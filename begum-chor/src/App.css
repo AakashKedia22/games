@@ -1,38 +1,281 @@
+/* Responsive container */
 .App {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px 80px;
   text-align: center;
+  position: relative;
+  min-height: 100vh;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
+@media (max-width: 700px) {
+  .App {
+    padding: 10px 10px;
+  }
+  .score-graph, .score-table {
+    padding: 10px;
+  }
+  .title-container {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .title-image {
+    width: 60px;
+    height: 40px;
+  }
+  .score-table table, .score-table th, .score-table td {
+    font-size: 0.9em;
+    padding: 6px;
+  }
+  .player-score label {
+    font-size: 1em;
+    gap: 5px;
+  }
+  .score-input {
+    padding: 10px;
   }
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
+.App::before,
+.App::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 60px;
+  background-image: url('https://upload.wikimedia.org/wikipedia/commons/thumb/d/d2/Queen_of_spades2.svg/520px-Queen_of_spades2.svg.png');
+  background-size: 80px;
+  background-repeat: repeat-y;
+  background-position: center;
+  z-index: 1;
+  opacity: 0.8;
+}
+
+.App::before {
+  left: 0;
+}
+
+.App::after {
+  right: 0;
+}
+
+/* Ensure content appears above the borders */
+.App > * {
+  position: relative;
+  z-index: 2;
+}
+
+.title-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 30px;
+  gap: 20px;
+  position: relative;
+  padding: 20px 0;
+}
+
+.title-image {
+  width: 100px;
+  height: 60px;
+  object-fit: contain;
+  border-radius: 8px;
+  transform: rotate(-10deg);
+  box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+}
+
+.title-image.right {
+  transform: rotate(10deg);
+}
+
+.title-container h1 {
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+  position: relative;
+  z-index: 2;
+}
+
+h1 {
+  color: #2c3e50;
+  margin: 0;
+}
+
+.score-input {
+  margin-bottom: 40px;
+  padding: 20px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.player-score {
+  margin: 15px 0;
+}
+
+.player-score label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 1.1em;
+}
+
+.player-score input {
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  width: 80px;
+  font-size: 1em;
+}
+
+button {
+  margin-top: 20px;
+  padding: 10px 20px;
+  background-color: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1em;
+  transition: background-color 0.3s;
+}
+
+button:hover {
+  background-color: #2980b9;
+}
+
+.score-graph {
+  margin-top: 40px;
+  padding: 20px;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.score-table {
+  margin-top: 40px;
+  padding: 20px;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  overflow-x: auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.score-table table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+
+.score-table th,
+.score-table td {
+  padding: 12px;
+  text-align: center;
+  border: 1px solid #ddd;
+}
+
+.score-table th {
+  background-color: #f8f9fa;
+  font-weight: bold;
+}
+
+.score-table tr.editing {
+  background-color: #fff3cd;
+}
+
+.score-table button {
+  padding: 6px 12px;
+  margin: 0 4px;
+}
+
+.session-screen {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+  min-height: 60vh;
+  gap: 30px;
 }
 
-.App-link {
-  color: #61dafb;
+.session-actions {
+  margin: 20px 0;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.session-join {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+  padding: 30px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.session-join input {
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 1.1em;
+  width: 250px;
+  text-align: center;
+}
+
+.session-join .error {
+  color: #e74c3c;
+  margin: 0;
+}
+
+.session-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  margin-bottom: 10px;
+  font-size: 0.9em;
+  color: #7f8c8d;
+}
+
+.new-game-btn {
+  margin: 0;
+  padding: 6px 14px;
+  font-size: 0.85em;
+  background-color: #95a5a6;
+}
+
+.new-game-btn:hover {
+  background-color: #7f8c8d;
+}
+
+.connection-status {
+  font-size: 0.85em;
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 4px;
+}
+
+.connection-status.connected {
+  color: #27ae60;
+}
+
+.connection-status.disconnected {
+  color: #e74c3c;
+  background-color: #fdf0ef;
+}
+
+.connection-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin: 0 10px;
+}
+
+.connection-dot.connected {
+  background-color: #27ae60;
+}
+
+.connection-dot.disconnected {
+  background-color: #e74c3c;
 }

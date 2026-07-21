@@ -1,70 +1,109 @@
-# Getting Started with Create React App
+# Begam Chor Score Card
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A real-time multiplayer score tracker for the card game **Begam Chor** (also known as *Black Lady* or *Hearts*). Track scores across devices with live sync — no accounts, no sign-ups, just play.
 
-## Available Scripts
+---
 
-In the project directory, you can run:
+## Features
 
-### `npm start`
+- **Live sync** — all devices on the same session see scores update in real time
+- **Session-based** — create a room, share the 4-digit code, and join from any device
+- **Cumulative chart** — watch the score graph grow round by round
+- **Edit rounds** — made a mistake? Edit any previous round
+- **Validation** — enforces Kaali Begam (queen of spades) rules and score totals
+- **No cloud dependency** — runs entirely on your local network via WebSocket
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## How It Works
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+| Step | What happens |
+|------|-------------|
+| 1 | One player starts a **session** from their laptop |
+| 2 | Other players **join** using the session code on their phones |
+| 3 | Enter round scores from any device |
+| 4 | All devices update instantly |
 
-### `npm test`
+## Scoring Rules
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+- Each round, **5 points** are distributed among players (the person with the lowest card wins the trick)
+- **Kaali Begam** (Queen of Spades) carries **13 points**
+- A player caught with Kaali Begam scores **-5 points**
+- The sum of all positive scores in a round must equal **exactly 25**
+- At least one player must have a score **>= 12** (Kaali Begam penalty)
 
-### `npm run build`
+## Tech Stack
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 19 + Chart.js |
+| Backend | Node.js + WebSocket (`ws`) |
+| Real-time | WebSocket (no Firebase) |
+| Storage | In-memory (volatile) |
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Getting Started
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+### Prerequisites
 
-### `npm run eject`
+- Node.js 18+
+- npm
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+### Install
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```bash
+npm install
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+### Development (two terminals)
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+```bash
+# Terminal 1 — React dev server
+npm start
 
-## Learn More
+# Terminal 2 — Game server
+npm run server
+```
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+The app opens at `http://localhost:3000`. The WebSocket server runs on port **3001**.
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+### Production (single command)
 
-### Code Splitting
+```bash
+npm run prod
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+This builds the React app and starts a single server that serves both the frontend and the WebSocket backend on port **3001**.
 
-### Analyzing the Bundle Size
+### Access from other devices
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+Your laptop's IP is displayed in the terminal. Open `http://<YOUR_IP>:3000` (dev) or `http://<YOUR_IP>:3001` (prod) on any device on the same network.
 
-### Making a Progressive Web App
+```
+Your IP example: 192.168.1.42
+Phone URL:       http://192.168.1.42:3000
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+## Scripts
 
-### Advanced Configuration
+| Command | Description |
+|---------|-------------|
+| `npm start` | React dev server on `:3000` |
+| `npm run server` | WebSocket game server on `:3001` |
+| `npm run build` | Production build to `build/` |
+| `npm run prod` | Build + serve everything on `:3001` |
+| `npm test` | Run tests |
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+## Project Structure
 
-### Deployment
+```
+begam-chor/
+├── public/          # Static assets
+├── src/
+│   ├── App.js       # Main game component
+│   ├── App.css      # Styling
+│   └── index.js     # React entry point
+├── server.mjs       # WebSocket game server
+└── package.json
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+## License
 
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+MIT
