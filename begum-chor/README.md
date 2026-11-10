@@ -24,11 +24,18 @@ A real-time multiplayer score tracker for the card game **Begam Chor** (also kno
 
 ## Scoring Rules
 
-- Each round, **5 points** are distributed among players (the person with the lowest card wins the trick)
-- **Kaali Begam** (Queen of Spades) carries **13 points**
-- A player caught with Kaali Begam scores **-5 points**
-- The sum of all positive scores in a round must equal **exactly 25**
-- At least one player must have a score **>= 12** (Kaali Begam penalty)
+- Each round, players enter their **share** of the 25 points. Shares must total exactly **25**, and at least one share must be **12 or more** (the Kaali Begam holder).
+- Each player's entered share can also receive a separate adjustment through two checkboxes:
+
+  | No Hath | Commit No Hath | Adjustment |
+  |---------|----------------|------------|
+  | No | No | 0 |
+  | Yes | No | -5 |
+  | Yes | Yes | -15 |
+  | No | Yes | +25 |
+
+- The round score is the entered share plus the checkbox adjustment. The share total remains 25 regardless of adjustments.
+- Lowest cumulative score leads. The history table and chart show adjusted round scores.
 
 ## Tech Stack
 
