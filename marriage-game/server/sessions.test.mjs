@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  MAX_UNDO, applyUndo, applyUpdate, createSession, generateCode,
-  isValidGameState, loadSessions, publicState, saveSessions
+  MAX_GAMES, MAX_UNDO, applyUndo, applyUpdate, createSession, deleteGame, finishGame, generateCode,
+  isValidArchivedGame, isValidGameState, loadSessions, publicState, saveSessions
 } from './sessions.mjs';
 
 const SETTINGS = {};
@@ -18,6 +18,7 @@ test('creates a session with defaults and nothing to undo', () => {
   assert.equal(view.players.length, 4);
   assert.deepEqual(view.settings, {});
   assert.deepEqual(view.rounds, []);
+  assert.deepEqual(view.games, []);
   assert.equal(view.canUndo, false);
 });
 
@@ -75,6 +76,77 @@ test('saves and loads sessions without clients', () => {
     fs.writeFileSync(file, JSON.stringify({ 'XX-1': state([]), 'MG-1111': { players: 'bad' } }));
     assert.deepEqual(loadSessions(file), {});
     assert.deepEqual(loadSessions(path.join(dir, 'missing.json')), {});
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('finishGame archives the current game and undo brings it back', () => {
+  const session = createSession();
+  applyUpdate(session, state([ROUND, ROUND]));
+  assert.equal(finishGame(session, 1700000000000), true);
+  assert.deepEqual(session.rounds, []);
+  assert.equal(session.games.length, 1);
+  assert.deepEqual(session.games[0], { finishedAt: 1700000000000, players: ['A', 'B', 'C'], rounds: [ROUND, ROUND] });
+  assert.deepEqual(publicState(session).games, session.games);
+  assert.equal(applyUndo(session), true);
+  assert.deepEqual(session.games, []);
+  assert.deepEqual(session.rounds, [ROUND, ROUND]);
+});
+
+test('finishGame refuses an empty game without recording undo', () => {
+  const session = createSession();
+  assert.equal(finishGame(session), false);
+  assert.equal(session.undo.length, 0);
+  assert.deepEqual(session.games, []);
+});
+
+test('applyUpdate keeps archived games', () => {
+  const session = createSession();
+  applyUpdate(session, state([ROUND]));
+  finishGame(session, 1);
+  applyUpdate(session, state([ROUND]));
+  assert.equal(session.games.length, 1);
+  assert.deepEqual(session.rounds, [ROUND]);
+});
+
+test('deleteGame removes one archived game and is undoable', () => {
+  const session = createSession();
+  applyUpdate(session, state([ROUND]));
+  finishGame(session, 1);
+  applyUpdate(session, state([ROUND, ROUND]));
+  finishGame(session, 2);
+  assert.equal(deleteGame(session, 5), false);
+  assert.equal(deleteGame(session, -1), false);
+  assert.equal(deleteGame(session, '0'), false);
+  assert.equal(deleteGame(session, 0), true);
+  assert.deepEqual(session.games.map(game => game.finishedAt), [2]);
+  assert.equal(applyUndo(session), true);
+  assert.deepEqual(session.games.map(game => game.finishedAt), [1, 2]);
+});
+
+test('archived games are capped', () => {
+  const session = createSession();
+  for (let i = 0; i < MAX_GAMES + 3; i += 1) {
+    applyUpdate(session, state([ROUND]));
+    finishGame(session, i);
+  }
+  assert.equal(session.games.length, MAX_GAMES);
+  assert.equal(session.games[0].finishedAt, 3);
+});
+
+test('saves and loads archived games, dropping invalid ones', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'marriage-'));
+  try {
+    const file = path.join(dir, 'sessions.json');
+    const session = createSession();
+    applyUpdate(session, state([ROUND]));
+    finishGame(session, 42);
+    session.games.push({ finishedAt: 'x', players: ['A'], rounds: [] });
+    saveSessions(file, { 'MG-2222': session });
+    const loaded = loadSessions(file);
+    assert.deepEqual(loaded['MG-2222'].games, [{ finishedAt: 42, players: ['A', 'B', 'C'], rounds: [ROUND] }]);
+    assert.equal(isValidArchivedGame({ finishedAt: 1, players: ['A', 'B', 'C'], rounds: [] }), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

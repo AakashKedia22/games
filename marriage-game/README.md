@@ -12,6 +12,10 @@ A real-time multiplayer score tracker for the **Marriage** card game, played wit
 - **Round entry** — pick the Bandh closer, enter Hath (max 15) and Joker points, with a live preview and double-round banner
 - **Round history** — nets and running totals for every round, with an edit and delete button per row
 - **Cumulative chart** — watch the score graph grow round by round
+- **Finish game & past games** — "Finish game" archives the current game and starts a fresh one with the same players. Past games are listed newest first with an all-time leaderboard; finishing and deleting are undoable
+- **Player stats** — per player: total, Bandh count, Hath and Joker points, best and worst round, and doubles triggered
+- **Export & share** — download the game as CSV (also for past games), share the standings via the share sheet, or send them on WhatsApp
+- **Faster entry** — −/+ buttons beside every Hath and Joker box, Enter moves to the next box, and Hath moves on automatically once the number is complete
 - **Shared undo** — the undo history lives on the server, so every device can undo the last change
 - **Saved sessions** — sessions are written to `data/sessions.json` and survive server restarts
 - **Invite link and QR** — share the link or scan the QR code to join directly
@@ -41,6 +45,8 @@ Each round, every player has a **Bandh** checkbox and two point inputs, **Hath**
 5. **Double round:** if in the previous round any player's entered Joker points were **20 or more** (20 counts; 19 does not double), every player's round total in the next round is **×2**. Only the immediately previous round counts, and a doubled round can trigger the next double.
 
 Round totals always add up to 0. The highest total leads. Tied players share a rank. Changing a round recalculates every later round, because each round is stored as raw entries.
+
+Player stats show Hath and Joker points including the ×2 of double rounds, so Hath + Joker always equals Total.
 
 ## Tech Stack
 
@@ -118,6 +124,10 @@ marriage_game/
 │   ├── App.js              # Main game component
 │   ├── App.css             # Styling
 │   ├── scoring.js          # Round scoring, totals, standings and validation
+│   ├── stats.js            # Player stats, game summaries and all-time leaderboard
+│   ├── export.js           # CSV export, share text and WhatsApp link helpers
+│   ├── entry.js            # Stepper and Hath auto-advance helpers
+│   ├── stats.test.js, export.test.js, entry.test.js  # Tests for the modules above
 │   ├── invite.js           # Session code and invite link helpers
 │   └── index.js            # React entry point
 ├── server/

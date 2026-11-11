@@ -9,6 +9,9 @@ import {
   computeTotals, formatPoints, multiplierFor, nextMultiplier, normalizeSettings, triggersDouble, validateRound, validateSetup
 } from './scoring';
 import { buildInviteUrl, parseSessionCode } from './invite';
+import { computeAllTime, computePlayerStats, summarizeGame } from './stats';
+import { csvFileName, gameToCsv, standingsText, whatsappUrl } from './export';
+import { isCompleteHath, stepValue } from './entry';
 import './App.css';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
@@ -23,6 +26,58 @@ function setAddressSession(code) {
   if (code) url.searchParams.set('session', code);
   else url.searchParams.delete('session');
   window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+function downloadText(fileName, text, type = 'text/csv;charset=utf-8') {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function focusNextEntry(current, form) {
+  const fields = Array.from(form.querySelectorAll('input[data-entry]:not(:disabled)'));
+  const index = fields.indexOf(current);
+  if (index >= 0 && index < fields.length - 1) {
+    fields[index + 1].focus();
+    fields[index + 1].select();
+    return true;
+  }
+  return false;
+}
+
+function PointStepper({ id, label, value, onChange, max, disabled, placeholder, onKeyDown, onFocus }) {
+  return (
+    <div className="stepper">
+      <button type="button" className="step-btn" tabIndex={-1} aria-label={`Decrease ${label}`}
+        disabled={disabled} onClick={() => onChange(stepValue(value ?? '', -1, 0, max))}>−</button>
+      <input
+        id={id}
+        data-entry=""
+        className="point-input"
+        type="number"
+        inputMode="numeric"
+        enterKeyHint="next"
+        min="0"
+        max={max}
+        step="1"
+        placeholder={placeholder}
+        value={value ?? ''}
+        disabled={disabled}
+        onChange={event => onChange(event.target.value, event.target)}
+        onKeyDown={onKeyDown}
+        onFocus={onFocus}
+        aria-label={label}
+      />
+      <button type="button" className="step-btn" tabIndex={-1} aria-label={`Increase ${label}`}
+        disabled={disabled} onClick={() => onChange(stepValue(value ?? '', 1, 0, max))}>+</button>
+    </div>
+  );
 }
 
 function InviteCard({ code, inviteInfo, expanded, onToggle }) {
@@ -105,6 +160,8 @@ function App() {
   const [settings, setSettings] = useState(() => normalizeSettings(DEFAULT_SETTINGS));
   const [rounds, setRounds] = useState([]);
   const [canUndo, setCanUndo] = useState(false);
+  const [games, setGames] = useState([]);
+  const [shareMessage, setShareMessage] = useState('');
   const [bandh, setBandh] = useState('');
   const [hathInputs, setHathInputs] = useState({});
   const [jokerInputs, setJokerInputs] = useState({});
@@ -133,6 +190,7 @@ function App() {
       setPlayers(msg.players);
       setSettings(normalizeSettings(msg.settings));
       setRounds(msg.rounds);
+      setGames(Array.isArray(msg.games) ? msg.games : []);
       setCanUndo(Boolean(msg.canUndo));
     }
 
@@ -266,10 +324,11 @@ function App() {
     setRoundError('');
   };
 
-  const handleHathChange = (player, value) => {
+  const handleHathChange = (player, value, input) => {
     if (/^\d*$/.test(value)) {
       setHathInputs(previous => ({ ...previous, [player]: value }));
       setRoundError('');
+      if (input && isCompleteHath(value)) focusNextEntry(input, input.form);
     }
   };
 
@@ -345,11 +404,33 @@ function App() {
     resetRoundForm();
   };
 
+  const handleEntryKeyDown = (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    if (!focusNextEntry(event.target, event.target.form)) event.target.form.requestSubmit();
+  };
+  const handleEntryFocus = (event) => event.target.select();
+
   const handleUndo = () => {
     if (!canUndo || !canSend(setRoundError)) return;
     wsRef.current.send(JSON.stringify({ type: 'undo', sessionId }));
     setEditingRound(null);
     resetRoundForm();
+  };
+
+  const handleFinishGame = () => {
+    if (!rounds.length) return;
+    if (!window.confirm(`Finish this game after ${rounds.length} ${rounds.length === 1 ? 'round' : 'rounds'}? It moves to Past games and a new game starts with the same players. You can undo this.`)) return;
+    if (!canSend(setRoundError)) return;
+    wsRef.current.send(JSON.stringify({ type: 'finish_game', sessionId }));
+    setEditingRound(null);
+    resetRoundForm();
+  };
+
+  const handleDeleteGame = (index) => {
+    if (!window.confirm('Delete this past game? You can undo this.')) return;
+    if (!canSend(setRoundError)) return;
+    wsRef.current.send(JSON.stringify({ type: 'delete_game', sessionId, index }));
   };
 
   // ---- setup ----
@@ -419,6 +500,7 @@ function App() {
     pendingInviteRef.current = false;
     setSessionId(null);
     setRounds([]);
+    setGames([]);
     setCanUndo(false);
     resetRoundForm();
     setEditingRound(null);
@@ -434,6 +516,27 @@ function App() {
   const totals = useMemo(() => computeTotals(rounds, players), [rounds, players]);
   const standings = useMemo(() => computeStandings(totals, players), [totals, players]);
   const leaders = new Set(rounds.length ? standings.filter(row => row.rank === 1).map(row => row.player) : []);
+  const playerStats = useMemo(() => computePlayerStats(rounds, players), [rounds, players]);
+  const pastGames = useMemo(() => games.map((game, index) => ({ ...summarizeGame(game), index })).reverse(), [games]);
+  const allTime = useMemo(() => computeAllTime(games), [games]);
+  const shareText = standingsText(players, rounds, sessionId);
+  const handleShare = async () => {
+    setShareMessage('');
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Marriage Score Card', text: shareText });
+        return;
+      } catch (error) {
+        if (error && error.name === 'AbortError') return;
+      }
+    }
+    window.open(whatsappUrl(shareText), '_blank', 'noopener');
+  };
+  const handleDownloadCsv = () => {
+    downloadText(csvFileName(new Date()), gameToCsv(players, rounds));
+    setShareMessage('Score sheet downloaded.');
+  };
+  const handleDownloadGameCsv = (game) => downloadText(csvFileName(game.finishedAt), gameToCsv(game.players, game.rounds));
 
   const chartData = useMemo(() => ({
     labels: ['Start', ...rounds.map((_, index) => `R${index + 1}`)],
@@ -576,36 +679,30 @@ function App() {
                     <span>Bandh</span>
                   </label>
                   <div className="points-pair">
-                    <label>
+                    <label htmlFor={`hath-${index}`}>
                       Hath
-                      <input
+                      <PointStepper
                         id={`hath-${index}`}
-                        className="point-input"
-                        type="number"
-                        inputMode="numeric"
-                        min="0"
-                        max="15"
-                        step="1"
-                        placeholder={isCloser ? '—' : '0'}
-                        value={isCloser ? '' : (hathInputs[player] ?? '')}
+                        label={`${player} hath points`}
+                        value={isCloser ? '' : hathInputs[player]}
+                        max={MAX_HATH}
                         disabled={isCloser}
-                        onChange={event => handleHathChange(player, event.target.value)}
-                        aria-label={`${player} hath points`}
+                        placeholder={isCloser ? '—' : '0'}
+                        onChange={(value, input) => handleHathChange(player, value, input)}
+                        onKeyDown={handleEntryKeyDown}
+                        onFocus={handleEntryFocus}
                       />
                     </label>
-                    <label>
+                    <label htmlFor={`joker-${index}`}>
                       Joker
-                      <input
+                      <PointStepper
                         id={`joker-${index}`}
-                        className="point-input"
-                        type="number"
-                        inputMode="numeric"
-                        min="0"
-                        step="1"
+                        label={`${player} joker points`}
+                        value={jokerInputs[player]}
                         placeholder="0"
-                        value={jokerInputs[player] ?? ''}
-                        onChange={event => handleJokerChange(player, event.target.value)}
-                        aria-label={`${player} joker points`}
+                        onChange={value => handleJokerChange(player, value)}
+                        onKeyDown={handleEntryKeyDown}
+                        onFocus={handleEntryFocus}
                       />
                     </label>
                   </div>
@@ -640,6 +737,15 @@ function App() {
             </div>
           ))}
         </div>
+        <div className="standings-actions">
+          <button type="button" className="secondary-btn" onClick={handleShare} disabled={!rounds.length}>Share</button>
+          <a className={`secondary-btn whatsapp-link ${rounds.length ? '' : 'is-disabled'}`}
+            href={rounds.length ? whatsappUrl(shareText) : undefined} target="_blank" rel="noreferrer"
+            aria-disabled={!rounds.length}>WhatsApp</a>
+          <button type="button" className="secondary-btn" onClick={handleDownloadCsv} disabled={!rounds.length}>Download CSV</button>
+          <button type="button" className="finish-btn" onClick={handleFinishGame} disabled={!rounds.length}>Finish game</button>
+        </div>
+        {shareMessage && <p className="copy-message" role="status">{shareMessage}</p>}
       </section>
 
       {rounds.length > 0 && (
@@ -711,7 +817,88 @@ function App() {
               </table>
             </div>
           </section>
+
+          <section className="score-table stats-table" aria-labelledby="stats-heading">
+            <h2 id="stats-heading">Player Stats</h2>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Stat</th>
+                    {players.map(player => <th scope="col" key={player}>{player}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ['Total', row => formatPoints(row.total)],
+                    ['Bandh closed', row => row.bandhs],
+                    ['Hath points', row => formatPoints(row.hathPoints)],
+                    ['Joker points', row => formatPoints(row.jokerPoints)],
+                    ['Best round', row => (row.best === null ? '—' : formatPoints(row.best))],
+                    ['Worst round', row => (row.worst === null ? '—' : formatPoints(row.worst))],
+                    ['Doubles triggered', row => row.doublesTriggered]
+                  ].map(([label, render]) => (
+                    <tr key={label}>
+                      <th scope="row">{label}</th>
+                      {playerStats.map(row => <td key={row.player}>{render(row)}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </>
+      )}
+
+      {games.length > 0 && (
+        <section className="score-table past-games" aria-labelledby="past-games-heading">
+          <h2 id="past-games-heading">Past Games</h2>
+          <h3 className="subheading">All-time leaderboard</h3>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Player</th>
+                  <th scope="col">Games</th>
+                  <th scope="col">Wins</th>
+                  <th scope="col">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allTime.map(row => (
+                  <tr key={row.player}>
+                    <td>{row.rank}</td>
+                    <th scope="row">{row.player}</th>
+                    <td>{row.games}</td>
+                    <td>{row.wins}</td>
+                    <td className={row.total < 0 ? 'negative-score' : ''}>{formatPoints(row.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <h3 className="subheading">Finished games</h3>
+          <ul className="past-game-list">
+            {pastGames.map(game => (
+              <li key={`${game.finishedAt}-${game.index}`} className="past-game">
+                <div className="past-game-head">
+                  <strong>{new Date(game.finishedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</strong>
+                  <span>{game.roundCount} {game.roundCount === 1 ? 'round' : 'rounds'} · Winner: {game.winners.join(', ')}</span>
+                </div>
+                <div className="past-game-scores">
+                  {game.standings.map(row => (
+                    <span key={row.player} className={row.total < 0 ? 'negative-score' : ''}>{row.player} {formatPoints(row.total)}</span>
+                  ))}
+                </div>
+                <div className="past-game-actions">
+                  <button type="button" className="secondary-btn" onClick={() => handleDownloadGameCsv(games[game.index])}>CSV</button>
+                  <button type="button" className="delete-btn" onClick={() => handleDeleteGame(game.index)}>Delete</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </main>
   );

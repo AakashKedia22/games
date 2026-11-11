@@ -421,3 +421,62 @@ button:focus-visible, input:focus-visible {
   .running-total { font-size: .66rem; }
   .row-actions .edit-btn, .row-actions .delete-btn { display: block; width: 100%; margin: 0 0 4px; padding: 5px 6px; font-size: .74rem; }
 }
+
+/* ---- v3: steppers, share row, stats, past games ---- */
+.stepper { display: grid; grid-template-columns: 38px minmax(0, 1fr) 38px; gap: 4px; align-items: stretch; }
+.stepper .point-input { min-width: 0; padding: 8px 4px; }
+.step-btn {
+  margin: 0;
+  padding: 0;
+  min-height: 46px;
+  border-radius: 7px;
+  background: #eef3ed;
+  color: var(--green-dark);
+  border: 1px solid var(--line);
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.step-btn:hover { background: #e2ebe1; }
+.step-btn:disabled { opacity: .45; cursor: not-allowed; }
+.player-score { grid-template-columns: minmax(90px, 1fr) auto minmax(280px, 320px) minmax(180px, 1.2fr); }
+.point-input::-webkit-outer-spin-button, .point-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.point-input { -moz-appearance: textfield; appearance: textfield; }
+
+.standings-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.standings-actions > * { margin: 0; }
+.whatsapp-link { display: inline-flex; align-items: center; text-decoration: none; border-radius: 8px; font-weight: 700; }
+.whatsapp-link.is-disabled { opacity: .5; pointer-events: none; }
+.finish-btn { margin-left: auto; padding: 8px 13px; font-size: .86rem; }
+
+.stats-table tbody th { white-space: nowrap; font-weight: 600; }
+.subheading { margin: 14px 0 8px; font-size: .95rem; color: var(--muted); }
+.past-game-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.past-game {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 2fr auto;
+  gap: 8px 14px;
+  align-items: center;
+  padding: 10px 12px;
+  background: #f8faf6;
+  border: 1px solid #e8eee7;
+  border-radius: 10px;
+}
+.past-game-head { display: grid; gap: 2px; }
+.past-game-head span { color: var(--muted); font-size: .82rem; }
+.past-game-scores { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: .9rem; font-variant-numeric: tabular-nums; }
+.past-game-actions { display: flex; gap: 6px; }
+.past-game-actions button { margin: 0; }
+
+@media (max-width: 700px) {
+  .player-score { grid-template-columns: minmax(0, 1fr) auto; }
+  .points-pair { gap: 8px; }
+  .stepper { grid-template-columns: 34px minmax(0, 1fr) 34px; gap: 3px; }
+  .step-btn { min-height: 48px; font-size: 1.2rem; }
+  .standings-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .standings-actions > * { justify-content: center; text-align: center; }
+  .finish-btn { margin-left: 0; grid-column: 1 / -1; }
+  .stats-table tbody th { white-space: normal; min-width: 70px; font-size: .8rem; }
+  .past-game { grid-template-columns: 1fr; }
+  .past-game-actions button { flex: 1 1 0; }
+}

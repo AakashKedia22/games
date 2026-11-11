@@ -6,7 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { pickLanAddresses } from './server/net.mjs';
 import {
-  applyUndo, applyUpdate, createSession, generateCode, loadSessions, publicState, saveSessions
+  applyUndo, applyUpdate, createSession, deleteGame, finishGame, generateCode, loadSessions, publicState, saveSessions
 } from './server/sessions.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -160,6 +160,27 @@ wss.on('connection', (ws) => {
         }
         if (!applyUndo(session)) {
           send(ws, { type: 'update_rejected', message: 'Nothing to undo.' });
+          return;
+        }
+        persist();
+        broadcast(session);
+        break;
+      }
+      case 'finish_game':
+      case 'delete_game': {
+        const session = sessions[msg.sessionId];
+        if (!session) {
+          send(ws, { type: 'error', message: 'Session not found. Check the code and try again.' });
+          return;
+        }
+        const changed = msg.type === 'finish_game' ? finishGame(session) : deleteGame(session, msg.index);
+        if (!changed) {
+          send(ws, {
+            type: 'update_rejected',
+            message: msg.type === 'finish_game'
+              ? 'Play at least one round before finishing the game.'
+              : 'That game could not be deleted. Refresh and try again.'
+          });
           return;
         }
         persist();

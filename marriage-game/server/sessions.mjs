@@ -5,6 +5,7 @@ export const DEFAULT_PLAYERS = ['Aakash', 'Shreya', 'Aryan', 'Paa'];
 // Keep in sync with DEFAULT_SETTINGS in src/scoring.js
 export const DEFAULT_SETTINGS = {};
 export const MAX_UNDO = 20;
+export const MAX_GAMES = 200;
 const CODE_PATTERN = /^MG-\d{4}$/;
 
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -16,6 +17,12 @@ export function isValidGameState(state) {
     Boolean(state.settings) && typeof state.settings === 'object' && !Array.isArray(state.settings) &&
     Array.isArray(state.rounds) && state.rounds.length <= 500 &&
     state.rounds.every(round => round && Array.isArray(round.entries));
+}
+
+export function isValidArchivedGame(game) {
+  return Boolean(game) && Number.isFinite(game.finishedAt) &&
+    isValidGameState({ players: game.players, settings: {}, rounds: game.rounds }) &&
+    game.rounds.length > 0;
 }
 
 export function generateCode(sessions, random = Math.random) {
@@ -31,6 +38,7 @@ export function createSession() {
     players: [...DEFAULT_PLAYERS],
     settings: { ...DEFAULT_SETTINGS },
     rounds: [],
+    games: [],
     undo: [],
     updatedAt: Date.now(),
     clients: []
@@ -38,7 +46,7 @@ export function createSession() {
 }
 
 export function snapshot(session) {
-  return clone({ players: session.players, settings: session.settings, rounds: session.rounds });
+  return clone({ players: session.players, settings: session.settings, rounds: session.rounds, games: session.games });
 }
 
 export function publicState(session) {
@@ -46,14 +54,19 @@ export function publicState(session) {
     players: session.players,
     settings: session.settings,
     rounds: session.rounds,
+    games: session.games,
     canUndo: session.undo.length > 0
   };
 }
 
-export function applyUpdate(session, state) {
-  if (!isValidGameState(state)) return false;
+function pushUndo(session) {
   session.undo.push(snapshot(session));
   if (session.undo.length > MAX_UNDO) session.undo.shift();
+}
+
+export function applyUpdate(session, state) {
+  if (!isValidGameState(state)) return false;
+  pushUndo(session);
   const next = clone({ players: state.players, settings: state.settings, rounds: state.rounds });
   session.players = next.players;
   session.settings = next.settings;
@@ -68,6 +81,26 @@ export function applyUndo(session) {
   session.players = previous.players;
   session.settings = previous.settings;
   session.rounds = previous.rounds;
+  if (Array.isArray(previous.games)) session.games = previous.games;
+  session.updatedAt = Date.now();
+  return true;
+}
+
+// Archive the current game and start a fresh one with the same players.
+export function finishGame(session, now = Date.now()) {
+  if (!session.rounds.length) return false;
+  pushUndo(session);
+  const game = clone({ finishedAt: now, players: session.players, rounds: session.rounds });
+  session.games = [...session.games, game].slice(-MAX_GAMES);
+  session.rounds = [];
+  session.updatedAt = now;
+  return true;
+}
+
+export function deleteGame(session, index) {
+  if (!Number.isInteger(index) || index < 0 || index >= session.games.length) return false;
+  pushUndo(session);
+  session.games = session.games.filter((_, i) => i !== index);
   session.updatedAt = Date.now();
   return true;
 }
@@ -79,6 +112,7 @@ export function serializeSessions(sessions) {
       players: session.players,
       settings: session.settings,
       rounds: session.rounds,
+      games: session.games,
       undo: session.undo,
       updatedAt: session.updatedAt
     };
@@ -108,6 +142,7 @@ export function loadSessions(filePath) {
       players: stored.players,
       settings: stored.settings,
       rounds: stored.rounds,
+      games: Array.isArray(stored.games) ? stored.games.filter(isValidArchivedGame).slice(-MAX_GAMES) : [],
       undo: Array.isArray(stored.undo) ? stored.undo.filter(isValidGameState).slice(-MAX_UNDO) : [],
       updatedAt: Number(stored.updatedAt) || Date.now(),
       clients: []
