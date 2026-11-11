@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { HAND_SIZE, PRINTED_JOKER, RANKS, SUITS, SUIT_SYMBOLS, cardCode, countCards, formatCard } from './cards';
 import { addCard, isRedCode, maxCopies, removeCard } from './handEntry';
+import { PhotoReview } from './PhotoReview';
+import { prepareUpload, recognizePhoto, reviewCards, reviewSamples, saveTrainingSamples, startReview } from './recognition';
 
 const GROUP_LABELS = { pureRun: 'Pure run', run: 'Run', pureTriple: 'Pure triple', set: 'Set' };
 
@@ -10,13 +12,60 @@ export function CardPicker({ player, cards, openCard, onChange }) {
   const tabs = [...SUITS, PRINTED_JOKER];
   const codes = suit === PRINTED_JOKER ? [PRINTED_JOKER] : RANKS.map((_, index) => cardCode(index + 1, suit));
   const handFull = cards.length >= HAND_SIZE;
+  const [photo, setPhoto] = useState({ busy: false, error: '', review: null });
+  const [keepSamples, setKeepSamples] = useState(true);
+
+  const handlePhoto = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+    setPhoto({ busy: true, error: '', review: null });
+    try {
+      const found = await recognizePhoto(await prepareUpload(file));
+      setPhoto(found.length
+        ? { busy: false, error: '', review: startReview(found) }
+        : { busy: false, error: 'No cards found. Lay the cards apart on a dark cloth, fill the frame and try again.', review: null });
+    } catch (error) {
+      setPhoto({ busy: false, error: error.message, review: null });
+    }
+  };
+
+  const usePhotoCards = () => {
+    // addCard enforces the hand size and the copies limit (3 decks, one fewer of the open card).
+    onChange(reviewCards(photo.review).reduce((hand, code) => addCard(hand, code, openCard), []));
+    if (keepSamples) saveTrainingSamples(reviewSamples(photo.review));
+    setPhoto({ busy: false, error: '', review: null });
+  };
+
+  if (photo.review) {
+    return (
+      <div className="card-picker">
+        <PhotoReview
+          review={photo.review}
+          onChange={review => setPhoto(current => ({ ...current, review }))}
+          onUse={usePhotoCards}
+          onCancel={() => setPhoto({ busy: false, error: '', review: null })}
+          keepSamples={keepSamples}
+          onKeepSamplesChange={setKeepSamples}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="card-picker">
       <div className="card-picker-head">
         <strong className={handFull ? 'hand-full' : ''}>{cards.length}/{HAND_SIZE} cards</strong>
-        <button type="button" className="secondary-btn" onClick={() => onChange([])} disabled={!cards.length}>Clear</button>
+        <div className="card-picker-actions">
+          <label className={`secondary-btn photo-btn ${photo.busy ? 'is-busy' : ''}`}>
+            {photo.busy ? 'Reading…' : '📷 Photo'}
+            <input type="file" accept="image/*" capture="environment" className="visually-hidden"
+              disabled={photo.busy} onChange={handlePhoto} aria-label={`Photo of ${player}'s cards`} />
+          </label>
+          <button type="button" className="secondary-btn" onClick={() => onChange([])} disabled={!cards.length}>Clear</button>
+        </div>
       </div>
+      {photo.error && <p className="hand-error" role="alert">{photo.error}</p>}
       <div className="suit-tabs" role="tablist" aria-label={`${player} suit`}>
         {tabs.map(tab => (
           <button

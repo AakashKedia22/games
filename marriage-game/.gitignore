@@ -24,3 +24,10 @@ yarn-error.log*
 
 # saved game sessions
 /data
+
+# card recognition: environment, dataset and trained model stay local
+/vision/.venv
+/vision/datasets
+/vision/models
+__pycache__/
+.pytest_cache/

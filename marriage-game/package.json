@@ -23,6 +23,10 @@
     "test:server": "node --test server/*.test.mjs",
     "test": "react-scripts test",
     "test:all": "CI=true react-scripts test && node --test server/*.test.mjs",
+    "vision:setup": "uv venv vision/.venv --python 3.12 && uv pip install --python vision/.venv/bin/python -r vision/requirements.txt",
+    "vision:setup-train": "uv pip install --python vision/.venv/bin/python -r vision/requirements-train.txt",
+    "vision:test": "cd vision && .venv/bin/python -m pytest -q",
+    "vision:train": "vision/.venv/bin/python vision/train.py",
     "eject": "react-scripts eject",
     "prod": "npm run build && node server.mjs"
   },

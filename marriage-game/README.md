@@ -11,6 +11,7 @@ A real-time multiplayer score tracker for the **Marriage** card game, played wit
 - **Setup** — choose 3 or 4 players with the Game mode toggle and set the names
 - **Round entry** — pick the Bandh closer, enter Hath (max 15) and Joker points, with a live preview and double-round banner
 - **Card entry (v4a)** — set the opened joker card, tap in each player's 30 cards, and the app works out Hath and Joker points (best grouping, joker bonuses, pure triples), with a breakdown
+- **Photo entry**: photograph a player's cards, check the detected cards, and the hand is scored. Recognition runs offline on the laptop.
 - **Round history** — nets and running totals for every round, with an edit and delete button per row
 - **Cumulative chart** — watch the score graph grow round by round
 - **Finish game & past games** — "Finish game" archives the current game and starts a fresh one with the same players. Past games are listed newest first with an all-time leaderboard; finishing and deleting are undoable
@@ -115,6 +116,22 @@ Your IP example: 192.168.1.42
 Phone URL:       http://192.168.1.42:3000
 ```
 
+## Card recognition (photo)
+
+1. **Install** (once, needs internet): `npm run vision:setup`, then for training also `npm run vision:setup-train`. Needs `uv` (https://docs.astral.sh/uv/). It downloads Python 3.12 into `vision/.venv`.
+2. **Get the dataset** (once):
+   - Sign in to Kaggle and download "Cards Image Dataset-Classification" (https://www.kaggle.com/datasets/gpiosenka/cards-image-datasetclassification).
+   - Unzip it so you have `vision/datasets/cards/train`, `valid` and `test`.
+   - Check the dataset's licence on that page.
+3. **Train**: `npm run vision:train`. It uses the Mac GPU (MPS), takes about 15–30 minutes, and prints test accuracy at the end. It writes `vision/models/cards.onnx`, `labels.json` and `metrics.json`. Restart the server afterwards.
+4. **Taking a good photo**:
+   - all 30 cards face up, not touching, on a dark plain cloth
+   - even light, no glare
+   - phone held flat above the cards, cards filling the frame
+5. **Improving it**: keep "Keep these photos" ticked. Corrected cards are saved in `data/vision/samples/`, and re-running `npm run vision:train` includes them, which teaches the model your own decks. Do this especially for the printed jokers.
+6. **Tests**: `npm run vision:test`.
+7. **Credit**: the training recipe is adapted from ajojotank/Playing-Card-Recognition-with-EfficientNet-B0 (MIT licence, © 2024 Joash Paul).
+
 ## Scripts
 
 | Command | Description |
@@ -145,11 +162,15 @@ marriage_game/
 │   ├── hand.js             # Best grouping of a hand: Hath and Joker points
 │   ├── handEntry.js        # Card entry helpers and cached hand scoring
 │   ├── CardPicker.js       # Card picker and hand breakdown UI
+│   ├── recognition.js      # Photo recognition client helpers
+│   ├── PhotoReview.js      # Photo check screen
 │   ├── cards.test.js, jokers.test.js, hand.test.js, handEntry.test.js  # Tests for the card modules
 │   ├── invite.js           # Session code and invite link helpers
 │   └── index.js            # React entry point
+├── vision/                 # Card recognition: OpenCV card detection, ONNX classifier, training
 ├── server/
 │   ├── sessions.mjs        # Session store, undo history and JSON persistence
+│   ├── vision.mjs          # Photo upload and the Python recognition worker
 │   └── net.mjs             # LAN address detection
 ├── server.mjs              # HTTP and WebSocket game server
 └── package.json

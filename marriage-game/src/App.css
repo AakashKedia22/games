@@ -572,3 +572,53 @@ button:focus-visible, input:focus-visible {
   .rank-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .cards-btn { flex: 1 1 auto; }
 }
+
+/* ---- v4b: photo recognition ---- */
+.card-picker-actions { display: flex; gap: 6px; }
+.photo-btn { display: inline-flex; align-items: center; justify-content: center; margin: 0; cursor: pointer; }
+.photo-btn.is-busy { opacity: .6; pointer-events: none; }
+.photo-review { display: grid; gap: 8px; }
+.photo-review-head { margin: 0; }
+.check-count { color: var(--danger); font-weight: 600; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+.photo-card {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  margin: 0;
+  padding: 3px;
+  background: white;
+  color: var(--ink);
+  border: 2px solid #cbd8ce;
+  border-radius: 8px;
+}
+.photo-card img { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 4px; }
+.photo-card.check { border-color: var(--danger); }
+.photo-card.active { border-color: var(--green); box-shadow: 0 0 0 2px var(--green); }
+.photo-card.removed img { opacity: .3; }
+.photo-label { font-size: .85rem; font-weight: 700; }
+.photo-label.red { color: #c0392b; }
+.check-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--danger);
+  color: white;
+  font-size: .6rem;
+  font-weight: 700;
+}
+.card-chooser { display: grid; gap: 8px; padding: 8px; background: #f8faf6; border: 1px solid var(--line); border-radius: 8px; }
+.chooser-guesses { display: flex; flex-wrap: wrap; gap: 6px; }
+.card-chip.selected { background: var(--green); color: white; border-color: var(--green); }
+.remove-chip { color: var(--danger); }
+.keep-samples { display: flex; align-items: center; gap: 8px; font-size: .85rem; }
+.photo-actions { display: flex; gap: 8px; }
+.photo-actions button { margin: 0; }
+
+@media (max-width: 700px) {
+  .photo-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .photo-actions button { flex: 1 1 0; }
+}

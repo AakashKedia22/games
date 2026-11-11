@@ -5,14 +5,25 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { pickLanAddresses } from './server/net.mjs';
+import { resolveBuildFile } from './server/static.mjs';
 import {
   applyUndo, applyUpdate, createSession, deleteGame, finishGame, generateCode, loadSessions, publicState, saveSessions
 } from './server/sessions.mjs';
+import { MAX_PHOTO_BYTES, createRecognizer, readBody, recognizePhoto, saveSamples, visionPaths } from './server/vision.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'sessions.json');
 const sessions = loadSessions(DATA_FILE);
+const VISION = visionPaths(__dirname);
+const recognizer = createRecognizer(VISION);
+
+function sendJson(res, status, body) {
+  const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
+  if (status === 413) headers.Connection = 'close'; // the rest of the oversized upload is not read
+  res.writeHead(status, headers);
+  res.end(JSON.stringify(body));
+}
 
 function persist() {
   try {
@@ -58,6 +69,24 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ ok: true }));
     return;
   }
+  if (requestPath === '/api/vision' && req.method === 'GET') {
+    sendJson(res, 200, { available: recognizer.available() });
+    return;
+  }
+  if (requestPath === '/api/recognize' && req.method === 'POST') {
+    readBody(req, MAX_PHOTO_BYTES)
+      .then(photo => recognizePhoto(recognizer, VISION, photo, req.headers['content-type']))
+      .catch(error => ({ status: error.status || 400, body: { error: error.message } }))
+      .then(({ status, body }) => sendJson(res, status, body));
+    return;
+  }
+  if (requestPath === '/api/training-samples' && req.method === 'POST') {
+    readBody(req, 1024 * 1024)
+      .then(raw => ({ status: 200, body: { saved: saveSamples(VISION, JSON.parse(raw.toString('utf8') || '{}').samples) } }))
+      .catch(error => ({ status: error.status || 400, body: { error: 'Could not save the samples.' } }))
+      .then(({ status, body }) => sendJson(res, status, body));
+    return;
+  }
   if (requestPath === '/api/info') {
     const addresses = pickLanAddresses(os.networkInterfaces());
     const port = server.address()?.port || Number(PORT);
@@ -75,8 +104,8 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (fs.existsSync(buildPath)) {
-    let filePath = path.join(buildPath, req.url === '/' ? 'index.html' : req.url.split('?')[0]);
-    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+    const filePath = resolveBuildFile(buildPath, req.url);
+    if (filePath && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
       const ext = path.extname(filePath);
       const mimeTypes = {
         '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
@@ -203,4 +232,5 @@ server.listen(PORT, '0.0.0.0', () => {
   addresses.forEach(address => console.log(`  Network: http://${address}:${port}`));
   if (!addresses.length) console.log('  Network: no private IPv4 address detected');
   console.log(`  Data:    ${DATA_FILE}`);
+  console.log(`  Cards:   ${recognizer.available() ? 'photo recognition ready' : 'photo recognition not set up (see README)'}`);
 });
