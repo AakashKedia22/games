@@ -12,6 +12,9 @@ import { buildInviteUrl, parseSessionCode } from './invite';
 import { computeAllTime, computePlayerStats, summarizeGame } from './stats';
 import { csvFileName, gameToCsv, standingsText, whatsappUrl } from './export';
 import { isCompleteHath, stepValue } from './entry';
+import { CardPicker, HandSummary } from './CardPicker';
+import { openCardOptions, scoreHandCached } from './handEntry';
+import { HAND_SIZE, formatCard } from './cards';
 import './App.css';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
@@ -165,6 +168,9 @@ function App() {
   const [bandh, setBandh] = useState('');
   const [hathInputs, setHathInputs] = useState({});
   const [jokerInputs, setJokerInputs] = useState({});
+  const [openCard, setOpenCard] = useState('');
+  const [handCards, setHandCards] = useState({});
+  const [pickerFor, setPickerFor] = useState(null);
   const [roundError, setRoundError] = useState('');
   const [editingRound, setEditingRound] = useState(null);
   const [setupOpen, setSetupOpen] = useState(false);
@@ -321,6 +327,9 @@ function App() {
     setBandh('');
     setHathInputs({});
     setJokerInputs({});
+    setOpenCard('');
+    setHandCards({});
+    setPickerFor(null);
     setRoundError('');
   };
 
@@ -345,12 +354,34 @@ function App() {
     setRoundError('');
   };
 
+  const fillFromHand = (player, cards, open) => {
+    const result = scoreHandCached(cards, open);
+    if (!result || result.error) return;
+    setHathInputs(previous => ({ ...previous, [player]: String(result.hath) }));
+    setJokerInputs(previous => ({ ...previous, [player]: String(result.jokerPoints) }));
+    setRoundError('');
+  };
+
+  const handleCardsChange = (player, cards) => {
+    setHandCards(previous => ({ ...previous, [player]: cards }));
+    fillFromHand(player, cards, openCard);
+  };
+
+  const handleOpenCardChange = (code) => {
+    setOpenCard(code);
+    players.forEach(player => fillFromHand(player, handCards[player], code));
+  };
+
+  const togglePicker = (player) => setPickerFor(current => (current === player ? null : player));
+
   const draftRound = {
+    ...(openCard ? { openCard } : {}),
     entries: players.map(player => ({
       player,
       bandh: bandh === player,
       hath: bandh === player || !hathInputs[player] ? 0 : Number(hathInputs[player]),
-      joker: jokerInputs[player] ? Number(jokerInputs[player]) : 0
+      joker: jokerInputs[player] ? Number(jokerInputs[player]) : 0,
+      ...(handCards[player] && handCards[player].length ? { cards: handCards[player] } : {})
     }))
   };
   const draftMultiplier = editingRound !== null ? multiplierFor(rounds, editingRound) : nextMultiplier(rounds);
@@ -388,6 +419,11 @@ function App() {
       nextHath[item.player] = item.bandh ? '' : String(item.hath);
       nextJoker[item.player] = String(item.joker);
     });
+    const nextCards = {};
+    round.entries.forEach(item => { if (Array.isArray(item.cards)) nextCards[item.player] = item.cards; });
+    setHandCards(nextCards);
+    setOpenCard(round.openCard || '');
+    setPickerFor(null);
     setEditingRound(roundIndex);
     setBandh(nextBandh);
     setHathInputs(nextHath);
@@ -667,6 +703,13 @@ function App() {
           {draftMultiplier === 2 && (
             <p className="double-banner" role="status">Double round — last round had 20 or more joker points. All points ×2.</p>
           )}
+          <label className="open-card-field">
+            Opened joker card
+            <select value={openCard} onChange={event => handleOpenCardChange(event.target.value)}>
+              <option value="">Not set</option>
+              {openCardOptions().map(code => <option key={code} value={code}>{formatCard(code)}</option>)}
+            </select>
+          </label>
           <div className="player-entry-list">
             {players.map((player, index) => {
               const isCloser = bandh === player;
@@ -706,6 +749,20 @@ function App() {
                       />
                     </label>
                   </div>
+                  <div className="cards-row">
+                    <button type="button" className="secondary-btn cards-btn" aria-expanded={pickerFor === player}
+                      onClick={() => togglePicker(player)}>
+                      Cards {(handCards[player] || []).length}/{HAND_SIZE}
+                    </button>
+                    {!openCard && (handCards[player] || []).length === HAND_SIZE && (
+                      <span className="hand-note">Set the opened joker card to score</span>
+                    )}
+                  </div>
+                  {pickerFor === player && (
+                    <CardPicker player={player} cards={handCards[player] || []} openCard={openCard}
+                      onChange={cards => handleCardsChange(player, cards)} />
+                  )}
+                  <HandSummary result={scoreHandCached(handCards[player], openCard)} isCloser={isCloser} />
                   <output className={`resolved-preview ${preview ? 'adjusted' : ''}`}>
                     {preview
                       ? `Hath ${formatPoints(preview.hath[player])} · Joker ${formatPoints(preview.joker[player])} · Total ${formatPoints(preview.nets[player])}`

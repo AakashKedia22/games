@@ -10,6 +10,7 @@ A real-time multiplayer score tracker for the **Marriage** card game, played wit
 - **Session-based** — create a room, share the session code, and join from any device
 - **Setup** — choose 3 or 4 players with the Game mode toggle and set the names
 - **Round entry** — pick the Bandh closer, enter Hath (max 15) and Joker points, with a live preview and double-round banner
+- **Card entry (v4a)** — set the opened joker card, tap in each player's 30 cards, and the app works out Hath and Joker points (best grouping, joker bonuses, pure triples), with a breakdown
 - **Round history** — nets and running totals for every round, with an edit and delete button per row
 - **Cumulative chart** — watch the score graph grow round by round
 - **Finish game & past games** — "Finish game" archives the current game and starts a fresh one with the same players. Past games are listed newest first with an all-time leaderboard; finishing and deleting are undoable
@@ -47,6 +48,17 @@ Each round, every player has a **Bandh** checkbox and two point inputs, **Hath**
 Round totals always add up to 0. The highest total leads. Tied players share a rank. Changing a round recalculates every later round, because each round is stored as raw entries.
 
 Player stats show Hath and Joker points including the ×2 of double rounds, so Hath + Joker always equals Total.
+
+## House rules
+
+The card scoring follows these house rules:
+
+- **Decks:** 3 decks with printed jokers.
+- **Commit:** 5 pure sequences (runs of 3–5; A-2-3 and Q-K-A are allowed, no wrap-around), or 3 identical cards.
+- **Joker cards:** for the opened card R♦, the joker cards are all four R, R±1 and R±2 of ♦ (wrapping), plus the printed jokers.
+- **Bandh:** all 30 cards in runs (jokers allowed), pure triples (no jokers), or mixed-suit sets of 3–4 (jokers allowed).
+- **Hath:** the leftover card value (2–10 at face value, J Q K A = 10, jokers excluded) ÷ 10, rounded half up, max 15.
+- **Joker points table:** opened card 4; same-colour rank, neighbours and printed joker 2; other-colour rank 0; pair +2; three = 14 (10 for 0-value); all four ranks = 14; R−2..R+2 run = 25; pure triples 1/2/3/4/5 = 2/6/14/20/25. Each card counts in one bonus only, and the best split counts.
 
 ## Tech Stack
 
@@ -128,6 +140,12 @@ marriage_game/
 │   ├── export.js           # CSV export, share text and WhatsApp link helpers
 │   ├── entry.js            # Stepper and Hath auto-advance helpers
 │   ├── stats.test.js, export.test.js, entry.test.js  # Tests for the modules above
+│   ├── cards.js            # Card codes, values and validation (rules engine)
+│   ├── jokers.js           # Joker cards for the opened card and Joker points
+│   ├── hand.js             # Best grouping of a hand: Hath and Joker points
+│   ├── handEntry.js        # Card entry helpers and cached hand scoring
+│   ├── CardPicker.js       # Card picker and hand breakdown UI
+│   ├── cards.test.js, jokers.test.js, hand.test.js, handEntry.test.js  # Tests for the card modules
 │   ├── invite.js           # Session code and invite link helpers
 │   └── index.js            # React entry point
 ├── server/

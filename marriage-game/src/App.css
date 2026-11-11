@@ -480,3 +480,95 @@ button:focus-visible, input:focus-visible {
   .past-game { grid-template-columns: 1fr; }
   .past-game-actions button { flex: 1 1 0; }
 }
+
+/* ---- v4a: card entry ---- */
+.open-card-field { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-weight: 600; }
+.open-card-field select {
+  min-height: 42px;
+  padding: 6px 10px;
+  border: 1px solid #cbd8ce;
+  border-radius: 7px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+}
+.cards-row, .card-picker, .hand-summary, .hand-error { grid-column: 1 / -1; }
+.cards-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cards-btn { margin: 0; }
+.card-picker {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.card-picker-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.card-picker-head button { margin: 0; }
+.hand-full { color: var(--green-dark); }
+.suit-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.suit-tab {
+  margin: 0;
+  padding: 8px 0;
+  min-height: 44px;
+  background: #eef3ed;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 1.2rem;
+}
+.suit-tab.red { color: #c0392b; }
+.suit-tab:last-child { font-size: .85rem; font-weight: 700; }
+.suit-tab.active { background: var(--green); color: white; border-color: var(--green); }
+.rank-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 6px; }
+.rank-btn {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  min-height: 48px;
+  background: white;
+  color: var(--ink);
+  border: 1px solid #cbd8ce;
+  border-radius: 8px;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.rank-btn.red { color: #c0392b; }
+.rank-btn.has-cards { background: #fff8df; border-color: var(--gold); }
+.rank-btn:disabled { opacity: .45; cursor: not-allowed; }
+.rank-count {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: .68rem;
+  color: var(--muted);
+}
+.hand-chips, .group-list li { display: flex; flex-wrap: wrap; gap: 4px; }
+.card-chip {
+  margin: 0;
+  padding: 4px 7px;
+  min-height: 30px;
+  background: white;
+  color: var(--ink);
+  border: 1px solid #cbd8ce;
+  border-radius: 6px;
+  font-size: .85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.card-chip.red { color: #c0392b; }
+.card-chip.static { display: inline-flex; align-items: center; min-height: 0; }
+.card-chip.wild-card { background: #fff8df; border-color: var(--gold); }
+.hand-summary { font-size: .88rem; }
+.hand-summary summary { cursor: pointer; font-weight: 600; color: var(--green-dark); }
+.group-list { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; }
+.group-type { min-width: 76px; color: var(--muted); font-size: .78rem; align-self: center; }
+.hand-line { margin: 6px 0 0; }
+.hand-note { margin: 4px 0 0; color: var(--muted); font-size: .78rem; }
+.hand-warning, .hand-error { margin: 6px 0 0; color: var(--danger); font-size: .85rem; font-weight: 600; }
+
+@media (max-width: 700px) {
+  .open-card-field { flex-direction: column; align-items: stretch; gap: 6px; }
+  .rank-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .cards-btn { flex: 1 1 auto; }
+}
