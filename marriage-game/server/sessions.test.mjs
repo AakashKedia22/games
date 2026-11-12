@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   MAX_GAMES, MAX_UNDO, applyUndo, applyUpdate, createSession, deleteGame, finishGame, generateCode,
-  isValidArchivedGame, isValidGameState, loadSessions, publicState, saveSessions
+  isValidArchivedGame, isValidEntryCards, isValidGameState, loadSessions, publicState, saveSessions
 } from './sessions.mjs';
 
 const SETTINGS = {};
@@ -150,4 +150,68 @@ test('saves and loads archived games, dropping invalid ones', () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('a packed round is valid and keeps the packed flag', () => {
+  const PACKED = { entries: [{ player: 'A', bandh: true, hath: 0, joker: 0 }, { player: 'B', bandh: false, packed: true, hath: 10, joker: 3 }, { player: 'C', bandh: false, hath: 2, joker: 0 }] };
+  assert.equal(isValidGameState(state([PACKED, ROUND])), true);
+  const session = createSession();
+  assert.equal(applyUpdate(session, state([PACKED])), true);
+  assert.equal(session.rounds[0].entries[1].packed, true);
+});
+
+// v4f: commit cards. FIVE is 15 cards; THIRTY is 30 cards (copies are not checked by the server).
+const FIVE_CODES = ['2S', '3S', '4S', '9H', '10H', 'JH', '2C', '3C', '4C', '10D', 'JD', 'QD', '9C', '10C', 'JC'];
+const THIRTY = [...FIVE_CODES, ...FIVE_CODES].slice(0, 30);
+const withEntry = entry => ({ players: ['A', 'B', 'C'], settings: SETTINGS, rounds: [{ entries: [entry, ROUND.entries[1], ROUND.entries[2]] }] });
+
+test('applyUpdate accepts v4f committed, legacy and un-ticked card fields and keeps them', () => {
+  const committed = { player: 'A', bandh: true, hath: 0, joker: 10, committed: true, commitCards: FIVE_CODES, cards: FIVE_CODES };
+  const legacy = { player: 'A', bandh: false, hath: 0, joker: 0, cards: THIRTY };
+  const unticked = { player: 'A', bandh: false, hath: 0, joker: 0, committed: false, cards: THIRTY };
+  for (const entry of [committed, legacy, unticked]) {
+    const session = createSession();
+    assert.equal(applyUpdate(session, withEntry(entry)), true);
+    assert.deepEqual(session.rounds[0].entries[0], entry);
+  }
+});
+
+test('applyUpdate rejects bad card fields without recording undo', () => {
+  const bad = [
+    { player: 'A', cards: [...THIRTY, '2S'] },
+    { player: 'A', bandh: true, committed: true, commitCards: ['ZZ'], cards: FIVE_CODES },
+    { player: 'A', bandh: true, committed: 'yes', commitCards: FIVE_CODES, cards: FIVE_CODES },
+    { player: 'A', bandh: true, committed: false, commitCards: FIVE_CODES, cards: FIVE_CODES },
+    { player: 'A', bandh: true, committed: true, commitCards: [...FIVE_CODES, '2S'], cards: FIVE_CODES.slice(0, 15) }
+  ];
+  for (const entry of bad) {
+    const session = createSession();
+    assert.equal(applyUpdate(session, withEntry(entry)), false);
+    assert.deepEqual(session.undo, []);
+    assert.deepEqual(session.rounds, []);
+  }
+});
+
+test('loadSessions keeps a session whose card fields are malformed', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'marriage-'));
+  try {
+    const file = path.join(dir, 'sessions.json');
+    const stored = { players: ['A', 'B', 'C'], settings: SETTINGS, rounds: [{ entries: [{ player: 'A', cards: 'oops' }] }], games: [], undo: [], updatedAt: 1 };
+    fs.writeFileSync(file, JSON.stringify({ 'MG-3333': stored }));
+    assert.deepEqual(loadSessions(file)['MG-3333'].rounds, stored.rounds);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('isValidEntryCards checks the card fields of one entry', () => {
+  assert.equal(isValidEntryCards({ player: 'A', cards: THIRTY }), true);
+  assert.equal(isValidEntryCards({ player: 'A', committed: true, commitCards: FIVE_CODES, cards: FIVE_CODES }), true);
+  assert.equal(isValidEntryCards({ player: 'A', committed: false, cards: THIRTY }), true);
+  assert.equal(isValidEntryCards({ player: 'A', cards: [...THIRTY, '2S'] }), false);
+  assert.equal(isValidEntryCards({ player: 'A', committed: true, commitCards: ['ZZ'] }), false);
+  assert.equal(isValidEntryCards({ player: 'A', committed: 'yes' }), false);
+  assert.equal(isValidEntryCards({ player: 'A', commitCards: FIVE_CODES }), false);
+  assert.equal(isValidEntryCards({ player: 'A', committed: true, commitCards: [...THIRTY.slice(0, 26)] }), false);
+  assert.equal(isValidEntryCards(null), false);
 });

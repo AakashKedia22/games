@@ -54,9 +54,9 @@ export function validateOpenCard(openCard) {
   return null;
 }
 
-export function validateHand(cards, openCard) {
+// Codes and copy limits only (any length).
+export function validateCards(cards, openCard) {
   if (!Array.isArray(cards)) return 'Cards are missing.';
-  if (cards.length !== HAND_SIZE) return `A hand has ${HAND_SIZE} cards; this one has ${cards.length}.`;
   const bad = cards.find(code => !parseCard(code));
   if (bad !== undefined) return `Unknown card: ${bad}.`;
   const counts = countCards(cards);
@@ -66,4 +66,10 @@ export function validateHand(cards, openCard) {
     return `${formatCard(openCard)} is the opened card, so a hand can hold at most ${DECKS - 1}.`;
   }
   return null;
+}
+
+export function validateHand(cards, openCard) {
+  if (!Array.isArray(cards)) return 'Cards are missing.';
+  if (cards.length !== HAND_SIZE) return `A hand has ${HAND_SIZE} cards; this one has ${cards.length}.`;
+  return validateCards(cards, openCard);
 }

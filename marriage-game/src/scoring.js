@@ -3,6 +3,8 @@ export const MAX_NAME_LENGTH = 20;
 export const MAX_HATH = 15;
 export const MAX_JOKER = 9999;
 export const DOUBLE_THRESHOLD = 20;
+// A packed player always pays this much Hath to the closer, whatever is typed in.
+export const PACK_HATH = 10;
 
 // Keep in sync with DEFAULT_SETTINGS in server/sessions.mjs
 export const DEFAULT_SETTINGS = Object.freeze({});
@@ -25,8 +27,12 @@ export function validateRound(players, round) {
   if (entries.some(entry => !entry)) return 'Every player needs an entry for this round.';
   const closers = entries.filter(entry => entry.bandh === true);
   if (closers.length !== 1) return 'Tick Bandh for exactly one player.';
+  const packedCloser = entries.find(entry => entry.bandh === true && entry.packed === true);
+  if (packedCloser) return `${packedCloser.player} packed, so they cannot close the Bandh.`;
+  const unshown = entries.find(entry => entry.bandh === true && entry.committed === false);
+  if (unshown) return `${unshown.player} did not tick Committed, so they cannot close the Bandh.`;
   for (const entry of entries) {
-    if (entry.bandh) continue;
+    if (entry.bandh || entry.packed === true) continue;
     const hath = entryNumber(entry.hath);
     if (!Number.isInteger(hath) || hath < 0 || hath > MAX_HATH) {
       return `Hath points for ${entry.player} must be a whole number between 0 and ${MAX_HATH}.`;
@@ -71,7 +77,7 @@ export function computeRound(round, multiplier = 1) {
   entries.forEach(entry => {
     hath[entry.player] = 0;
     if (closer && entry !== closer) {
-      const lost = Math.min(entryNumber(entry.hath), MAX_HATH);
+      const lost = entry.packed === true ? PACK_HATH : Math.min(entryNumber(entry.hath), MAX_HATH);
       hath[entry.player] = lost === 0 ? 0 : -lost;
       collected += lost;
     }
@@ -89,6 +95,8 @@ export function computeRound(round, multiplier = 1) {
     multiplier,
     totalJoker,
     closer: closer ? closer.player : null,
+    packed: entries.filter(entry => entry.packed === true && entry !== closer).map(entry => entry.player),
+    committed: entries.filter(entry => entry.committed === true).map(entry => entry.player),
     triggersDouble: triggersDouble(round),
     valid: Boolean(closer)
   };

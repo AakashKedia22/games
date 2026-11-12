@@ -5,15 +5,19 @@ import {
   Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend
 } from 'chart.js';
 import {
-  DEFAULT_SETTINGS, PLAYER_COUNTS, MAX_HATH, computeRound, computeRounds, computeRunningTotals, computeStandings,
+  DEFAULT_SETTINGS, PACK_HATH, PLAYER_COUNTS, MAX_HATH, computeRound, computeRounds, computeRunningTotals, computeStandings,
   computeTotals, formatPoints, multiplierFor, nextMultiplier, normalizeSettings, triggersDouble, validateRound, validateSetup
 } from './scoring';
 import { buildInviteUrl, parseSessionCode } from './invite';
 import { computeAllTime, computePlayerStats, summarizeGame } from './stats';
 import { csvFileName, gameToCsv, standingsText, whatsappUrl } from './export';
 import { isCompleteHath, stepValue } from './entry';
-import { CardPicker, HandSummary } from './CardPicker';
-import { openCardOptions, scoreHandCached } from './handEntry';
+import { HandSummary } from './CardPicker';
+import { HandPanel } from './HandPanel';
+import { checkCommit } from './hand';
+import {
+  commitHint, entryCardFields, entryCardState, handFill, handHathBack, openCardOptions, scoreEntryCached, scoreHandCached
+} from './handEntry';
 import { HAND_SIZE, formatCard } from './cards';
 import './App.css';
 
@@ -168,8 +172,12 @@ function App() {
   const [bandh, setBandh] = useState('');
   const [hathInputs, setHathInputs] = useState({});
   const [jokerInputs, setJokerInputs] = useState({});
+  const [packed, setPacked] = useState({});
   const [openCard, setOpenCard] = useState('');
   const [handCards, setHandCards] = useState({});
+  const [commitCards, setCommitCards] = useState({});
+  const [committed, setCommitted] = useState({});
+  const [legacyCards, setLegacyCards] = useState({});
   const [pickerFor, setPickerFor] = useState(null);
   const [roundError, setRoundError] = useState('');
   const [editingRound, setEditingRound] = useState(null);
@@ -184,6 +192,7 @@ function App() {
   const formRef = useRef(null);
   const savedSessionRef = useRef(null);
   const pendingInviteRef = useRef(false);
+  const autoFillRef = useRef({});
 
   useEffect(() => {
     let stopped = false;
@@ -327,8 +336,13 @@ function App() {
     setBandh('');
     setHathInputs({});
     setJokerInputs({});
+    setPacked({});
+    autoFillRef.current = {};
     setOpenCard('');
     setHandCards({});
+    setCommitCards({});
+    setCommitted({});
+    setLegacyCards({});
     setPickerFor(null);
     setRoundError('');
   };
@@ -348,28 +362,71 @@ function App() {
     }
   };
 
+  // Bug fix: changing the opened card or a hand now clears the values the cards put in the boxes,
+  // instead of leaving stale ones (a value the player typed over stays).
+  const entryOf = (player, change = {}) => ({
+    commitCards: commitCards[player] || [], cards: handCards[player] || [], committed: Boolean(committed[player]), ...change
+  });
+
+  const fillFromHand = (player, entry, open) => {
+    const result = scoreEntryCached(entry, open, players.length);
+    const next = handFill(result, { hath: hathInputs[player], joker: jokerInputs[player] }, autoFillRef.current[player]);
+    autoFillRef.current = { ...autoFillRef.current, [player]: next.filled };
+    setHathInputs(previous => ({ ...previous, [player]: next.hath }));
+    setJokerInputs(previous => ({ ...previous, [player]: next.joker }));
+    if (next.filled) setRoundError('');
+  };
+
   const handleBandhChange = (player) => {
+    if (packed[player]) return;
+    const unticking = bandh === player;
     setBandh(current => (current === player ? '' : player));
     setHathInputs(previous => ({ ...previous, [player]: '' }));
     setRoundError('');
+    if (unticking) {
+      const back = handHathBack(scoreEntryCached(entryOf(player), openCard, players.length), autoFillRef.current[player]);
+      if (back) {
+        autoFillRef.current = { ...autoFillRef.current, [player]: back.filled };
+        setHathInputs(previous => ({ ...previous, [player]: back.hath }));
+      }
+    }
   };
 
-  const fillFromHand = (player, cards, open) => {
-    const result = scoreHandCached(cards, open);
-    if (!result || result.error) return;
-    setHathInputs(previous => ({ ...previous, [player]: String(result.hath) }));
-    setJokerInputs(previous => ({ ...previous, [player]: String(result.jokerPoints) }));
+  const handlePackedChange = (player) => {
+    setPacked(previous => ({ ...previous, [player]: !previous[player] }));
+    if (!packed[player] && bandh === player) setBandh('');
     setRoundError('');
   };
 
-  const handleCardsChange = (player, cards) => {
-    setHandCards(previous => ({ ...previous, [player]: cards }));
-    fillFromHand(player, cards, openCard);
+  // The Bandh cards (or, un-ticked, all cards) and the commit cards.
+  const handleCardsChange = (player, list) => {
+    setHandCards(previous => ({ ...previous, [player]: list }));
+    setLegacyCards(previous => ({ ...previous, [player]: false }));
+    fillFromHand(player, entryOf(player, { cards: list }), openCard);
+  };
+
+  const handleCommitCardsChange = (player, list) => {
+    setCommitCards(previous => ({ ...previous, [player]: list }));
+    setLegacyCards(previous => ({ ...previous, [player]: false }));
+    fillFromHand(player, entryOf(player, { commitCards: list }), openCard);
+  };
+
+  const handleCommittedChange = (player, value) => {
+    if (value && !checkCommit(commitCards[player] || [], openCard, players.length).ok) return;
+    setCommitted(previous => ({ ...previous, [player]: value }));
+    setLegacyCards(previous => ({ ...previous, [player]: false }));
+    fillFromHand(player, entryOf(player, { committed: value }), openCard);
+    setRoundError('');
   };
 
   const handleOpenCardChange = (code) => {
     setOpenCard(code);
-    players.forEach(player => fillFromHand(player, handCards[player], code));
+    players.forEach(player => {
+      // A ticked player whose commit no longer holds under the new opened card is un-ticked.
+      const keep = !committed[player] || checkCommit(commitCards[player] || [], code, players.length).ok;
+      if (!keep) setCommitted(previous => ({ ...previous, [player]: false }));
+      fillFromHand(player, entryOf(player, { committed: Boolean(committed[player]) && keep }), code);
+    });
   };
 
   const togglePicker = (player) => setPickerFor(current => (current === player ? null : player));
@@ -379,9 +436,10 @@ function App() {
     entries: players.map(player => ({
       player,
       bandh: bandh === player,
-      hath: bandh === player || !hathInputs[player] ? 0 : Number(hathInputs[player]),
+      hath: bandh === player ? 0 : packed[player] ? PACK_HATH : (!hathInputs[player] ? 0 : Number(hathInputs[player])),
       joker: jokerInputs[player] ? Number(jokerInputs[player]) : 0,
-      ...(handCards[player] && handCards[player].length ? { cards: handCards[player] } : {})
+      ...entryCardFields(entryOf(player)),
+      ...(packed[player] ? { packed: true } : {})
     }))
   };
   const draftMultiplier = editingRound !== null ? multiplierFor(rounds, editingRound) : nextMultiplier(rounds);
@@ -413,15 +471,43 @@ function App() {
     const round = rounds[roundIndex];
     const nextHath = {};
     const nextJoker = {};
+    const nextPacked = {};
     let nextBandh = '';
     round.entries.forEach(item => {
       if (item.bandh) nextBandh = item.player;
-      nextHath[item.player] = item.bandh ? '' : String(item.hath);
+      if (item.packed === true) nextPacked[item.player] = true;
+      nextHath[item.player] = item.bandh || item.packed === true ? '' : String(item.hath);
       nextJoker[item.player] = String(item.joker);
     });
+    // A saved round from before commit cards (legacy) opens un-ticked, with its 30 cards in the All cards list.
+    const nextCommitCards = {};
     const nextCards = {};
-    round.entries.forEach(item => { if (Array.isArray(item.cards)) nextCards[item.player] = item.cards; });
+    const nextCommitted = {};
+    const nextLegacy = {};
+    round.entries.forEach(item => {
+      if (!Array.isArray(item.cards) && !Array.isArray(item.commitCards)) return;
+      const saved = entryCardState(item);
+      nextCommitCards[item.player] = saved.commitCards;
+      nextCards[item.player] = saved.cards;
+      nextCommitted[item.player] = saved.committed;
+      nextLegacy[item.player] = saved.legacy;
+    });
+    // Only values the cards would put in the boxes count as auto-filled, so a later card change can clear them.
+    const nextAutoFill = {};
+    round.entries.forEach(item => {
+      if (!Array.isArray(item.cards) && !Array.isArray(item.commitCards)) return;
+      const result = scoreEntryCached(entryCardState(item), round.openCard, players.length);
+      if (!result || result.error) return;
+      const hath = String(result.hath);
+      const joker = String(result.jokerPoints);
+      if (hath === nextHath[item.player] && joker === nextJoker[item.player]) nextAutoFill[item.player] = { hath, joker };
+    });
+    autoFillRef.current = nextAutoFill;
+    setPacked(nextPacked);
     setHandCards(nextCards);
+    setCommitCards(nextCommitCards);
+    setCommitted(nextCommitted);
+    setLegacyCards(nextLegacy);
     setOpenCard(round.openCard || '');
     setPickerFor(null);
     setEditingRound(roundIndex);
@@ -659,7 +745,7 @@ function App() {
         </div>
         {!setupOpen && (
           <p className="setup-summary">
-            {players.length} players · Hath max {MAX_HATH} · Joker of 20 or more doubles the next round
+            {players.length} players · Hath max {MAX_HATH} · Pack pays {PACK_HATH} · Joker of 20 or more doubles the next round
           </p>
         )}
         {setupOpen && (
@@ -713,23 +799,31 @@ function App() {
           <div className="player-entry-list">
             {players.map((player, index) => {
               const isCloser = bandh === player;
+              const isPacked = Boolean(packed[player]);
               return (
-                <div key={player} className={`player-score ${isCloser ? 'is-winner' : ''}`}>
+                <div key={player} className={`player-score ${isCloser ? 'is-winner' : ''} ${isPacked ? 'is-packed' : ''}`}>
                   <label className="share-label" htmlFor={`hath-${index}`}>{player}</label>
-                  <label className="bandh-option">
-                    <input type="checkbox" checked={isCloser} aria-label={`${player} closed the Bandh`}
-                      onChange={() => handleBandhChange(player)} />
-                    <span>Bandh</span>
-                  </label>
+                  <div className="entry-flags">
+                    <label className="bandh-option">
+                      <input type="checkbox" checked={isCloser} aria-label={`${player} closed the Bandh`}
+                        disabled={Boolean(packed[player])} onChange={() => handleBandhChange(player)} />
+                      <span>Bandh</span>
+                    </label>
+                    <label className="bandh-option">
+                      <input type="checkbox" checked={isPacked} aria-label={`${player} packed`}
+                        onChange={() => handlePackedChange(player)} />
+                      <span>Packed</span>
+                    </label>
+                  </div>
                   <div className="points-pair">
                     <label htmlFor={`hath-${index}`}>
                       Hath
                       <PointStepper
                         id={`hath-${index}`}
                         label={`${player} hath points`}
-                        value={isCloser ? '' : hathInputs[player]}
+                        value={isCloser ? '' : isPacked ? String(PACK_HATH) : hathInputs[player]}
                         max={MAX_HATH}
-                        disabled={isCloser}
+                        disabled={isCloser || isPacked}
                         placeholder={isCloser ? '—' : '0'}
                         onChange={(value, input) => handleHathChange(player, value, input)}
                         onKeyDown={handleEntryKeyDown}
@@ -752,17 +846,24 @@ function App() {
                   <div className="cards-row">
                     <button type="button" className="secondary-btn cards-btn" aria-expanded={pickerFor === player}
                       onClick={() => togglePicker(player)}>
-                      Cards {(handCards[player] || []).length}/{HAND_SIZE}
+                      Cards {(commitCards[player] || []).length + (handCards[player] || []).length}/{HAND_SIZE}
+                      {committed[player] ? ' · Committed' : ''}
                     </button>
-                    {!openCard && (handCards[player] || []).length === HAND_SIZE && (
+                    {!openCard && (commitCards[player] || []).length + (handCards[player] || []).length === HAND_SIZE && (
                       <span className="hand-note">Set the opened joker card to score</span>
                     )}
                   </div>
                   {pickerFor === player && (
-                    <CardPicker player={player} cards={handCards[player] || []} openCard={openCard}
-                      onChange={cards => handleCardsChange(player, cards)} />
+                    <HandPanel player={player} commitCards={commitCards[player] || []} cards={handCards[player] || []}
+                      committed={Boolean(committed[player])} openCard={openCard} playerCount={players.length}
+                      onCommitCardsChange={list => handleCommitCardsChange(player, list)}
+                      onCardsChange={list => handleCardsChange(player, list)}
+                      onCommittedChange={value => handleCommittedChange(player, value)} />
                   )}
-                  <HandSummary result={scoreHandCached(handCards[player], openCard)} isCloser={isCloser} />
+                  <HandSummary result={scoreEntryCached(entryOf(player), openCard, players.length)}
+                    isCloser={isCloser} isPacked={isPacked} hint={commitHint(entryOf(player), players.length)}
+                    legacyResult={legacyCards[player] && (handCards[player] || []).length === HAND_SIZE
+                      ? scoreHandCached(handCards[player], openCard, players.length) : null} />
                   <output className={`resolved-preview ${preview ? 'adjusted' : ''}`}>
                     {preview
                       ? `Hath ${formatPoints(preview.hath[player])} · Joker ${formatPoints(preview.joker[player])} · Total ${formatPoints(preview.nets[player])}`
@@ -843,6 +944,7 @@ function App() {
                             <td key={player} className={player === result.closer ? 'winner-cell' : ''}>
                               <span className={net < 0 ? 'negative-score' : ''}>{formatPoints(net)}</span>
                               <span className="score-badge"><span>H {formatPoints(result.hath[player])}</span> <span>J {formatPoints(result.joker[player])}</span></span>
+                              {result.packed.includes(player) && <span className="packed-tag">Packed</span>}
                               <span className="running-total">Σ {formatPoints(runningTotals[roundIndex][player])}</span>
                             </td>
                           );
@@ -889,6 +991,7 @@ function App() {
                   {[
                     ['Total', row => formatPoints(row.total)],
                     ['Bandh closed', row => row.bandhs],
+                    ['Packed', row => row.packs],
                     ['Hath points', row => formatPoints(row.hathPoints)],
                     ['Joker points', row => formatPoints(row.jokerPoints)],
                     ['Best round', row => (row.best === null ? '—' : formatPoints(row.best))],

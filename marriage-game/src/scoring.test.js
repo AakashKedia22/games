@@ -130,6 +130,40 @@ describe('validateRound', () => {
   });
 });
 
+describe('pack', () => {
+  const PK = round('P1', [0, 3, 0, 0], [2, 5, 10, 25]);
+  PK.entries[2].packed = true;
+  test('a packed player pays 10 Hath and keeps Joker points', () => {
+    const result = computeRound(PK);
+    expect(result.hath).toEqual({ P1: 13, P2: -3, P3: -10, P4: 0 });
+    expect(result.joker).toEqual({ P1: -34, P2: -22, P3: -2, P4: 58 });
+    expect(result.nets).toEqual({ P1: -21, P2: -25, P3: -12, P4: 58 });
+    expect(sum(result.nets)).toBe(0);
+    expect(result.packed).toEqual(['P3']);
+  });
+  test('a typed Hath is ignored for a packed player', () => {
+    const typed = round('P1', [0, 3, 15, 0], [2, 5, 10, 25]);
+    typed.entries[2].packed = true;
+    expect(computeRound(typed).hath.P3).toBe(-10);
+  });
+  test('the pack payment is doubled in a double round', () => {
+    expect(computeRound(PK, 2).nets.P3).toBe(-24);
+  });
+  test('a packed player can be entered with any Hath', () => {
+    PK.entries[2].hath = 99;
+    expect(validateRound(P4, PK)).toBeNull();
+    PK.entries[2].hath = 0;
+  });
+  test('a packed player cannot close the Bandh', () => {
+    const r = round('P1', [0, 0, 0, 0], [0, 0, 0, 0]);
+    r.entries[0].packed = true;
+    expect(validateRound(P4, r)).toMatch(/cannot close/);
+  });
+  test('old rounds have no packed players', () => {
+    expect(computeRound(EX1).packed).toEqual([]);
+  });
+});
+
 describe('setup and formatting', () => {
   test('only 3 or 4 players', () => {
     expect(validateSetup(['A', 'B', 'C'])).toBeNull();
@@ -144,4 +178,24 @@ describe('setup and formatting', () => {
     expect(formatPoints(-2)).toBe('-2');
     expect(formatPoints(0)).toBe('0');
   });
+});
+
+test('a closer who did not tick Committed cannot submit; a ticked or legacy closer can', () => {
+  const P3 = ['P1', 'P2', 'P3'];
+  const unticked = round('P1', [0, 0, 2], [0, 0, 0], P3);
+  unticked.entries[0].committed = false;
+  expect(validateRound(P3, unticked)).toBe('P1 did not tick Committed, so they cannot close the Bandh.');
+  unticked.entries[0].committed = true;
+  expect(validateRound(P3, unticked)).toBeNull();
+  delete unticked.entries[0].committed;
+  expect(validateRound(P3, unticked)).toBeNull();
+});
+
+test('computeRound lists the players who ticked Committed', () => {
+  const CM = round('P1', [0, 0, 2, 12], [2, 5, 10, 25]);
+  CM.entries[0].committed = true;
+  CM.entries[2].committed = true;
+  CM.entries[1].committed = false;
+  expect(computeRound(CM).committed).toEqual(['P1', 'P3']);
+  expect(computeRound(EX3).committed).toEqual([]);
 });

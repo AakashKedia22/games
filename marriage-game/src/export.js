@@ -11,17 +11,17 @@ export function gameToCsv(players, rounds) {
   const results = computeRounds(rounds);
   const running = computeRunningTotals(rounds, players);
   const totals = computeTotals(rounds, players);
-  const header = ['Round', 'Bandh', 'Multiplier'];
+  const header = ['Round', 'Bandh', 'Multiplier', 'Packed', 'Committed'];
   players.forEach(player => header.push(`${player} Hath`, `${player} Joker`, `${player} Points`, `${player} Total`));
   const lines = [header];
   results.forEach((result, index) => {
-    const row = [index + 1, result.closer ?? '', result.multiplier];
+    const row = [index + 1, result.closer ?? '', result.multiplier, result.packed.join('; '), result.committed.join('; ')];
     players.forEach(player => {
       row.push(result.hath[player] ?? 0, result.joker[player] ?? 0, result.nets[player] ?? 0, running[index][player] ?? 0);
     });
     lines.push(row);
   });
-  const totalRow = ['Total', '', ''];
+  const totalRow = ['Total', '', '', '', ''];
   players.forEach(player => totalRow.push('', '', '', totals[player] ?? 0));
   lines.push(totalRow);
   return lines.map(line => line.map(csvEscape).join(',')).join('\n') + '\n';

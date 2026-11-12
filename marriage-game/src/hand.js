@@ -1,5 +1,6 @@
 import {
-  PRINTED_JOKER, SUITS, cardCode, cardValue, countCards, parseCard, validateHand, validateOpenCard
+  HAND_SIZE, PRINTED_JOKER, SUITS, cardCode, cardValue, countCards, parseCard, validateCards, validateHand,
+  validateOpenCard
 } from './cards';
 import { isJoker, jokerCardPoints, triplePoints } from './jokers';
 
@@ -12,12 +13,209 @@ export function hathFromValue(value) {
   return Math.min(MAX_HATH, Math.round(value / 10));
 }
 
+export const DOUBLET_COMMIT = { 3: 9, 4: 8 };
+export const DOUBLET_CLOSE_EXTRA = 2;
+// Three identical cards on the doublets route are a doublet plus a spare, so they earn no pure-triple points.
+export const DOUBLETS_SCORE_TRIPLES = false;
+export const FREE_RUN_MIN = 4;
+export const FREE_RUN_MAX = 5;
+// Protect sets tried per route before the search over combo breaks stops.
+export const MAX_PROTECT_SEARCH = 64;
+
 const slotOf = (suitIndex, rank) => suitIndex * 13 + rank - 1;
 const codeOf = slot => cardCode((slot % 13) + 1, SUITS[Math.floor(slot / 13)]);
 
-// Finds the grouping of a hand with at least 5 pure sequences that leaves the
+const orderOf = code => {
+  if (code === PRINTED_JOKER) return 1000;
+  const card = parseCard(code);
+  return slotOf(SUITS.indexOf(card.suit), card.rank);
+};
+const byOrder = (a, b) => orderOf(a) - orderOf(b);
+const toList = node => {
+  const items = [];
+  for (let n = node; n; n = n.next) items.push(n.item);
+  return items;
+};
+
+export function doubletTargets(playerCount) {
+  const commit = DOUBLET_COMMIT[playerCount];
+  return commit ? { commit, close: commit + DOUBLET_CLOSE_EXTRA } : null;
+}
+
+// Doublets are two identical natural cards (same rank and suit); three copies are a doublet
+// and a spare. Printed jokers never pair and no joker completes a doublet. A protected code
+// held three times is never a doublet (it would play a copy as itself).
+export function findDoublets(cards, protect = new Set()) {
+  const counts = countCards(cards);
+  const codes = Object.keys(counts).sort(byOrder);
+  const doublets = codes.filter(code => code !== PRINTED_JOKER && counts[code] >= 2
+    && !(protect.has(code) && counts[code] >= 3));
+  const rest = [];
+  codes.forEach(code => {
+    const left = doublets.includes(code) ? counts[code] - 2 : counts[code];
+    for (let n = 0; n < left; n += 1) rest.push(code);
+  });
+  return { doublets, rest };
+}
+
+// Commit by doublets: null below the commit count. Once committed, Hath is 0 and every other card
+// is ignored; `closed` (commit + 2 doublets) only decides who can be the Bandh closer.
+export function doubletArrangement(cards, openCard, playerCount, protect = new Set()) {
+  const targets = doubletTargets(playerCount);
+  if (!targets) return null;
+  const { doublets, rest } = findDoublets(cards, protect);
+  if (doublets.length < targets.commit) return null;
+  return {
+    closed: doublets.length >= targets.close,
+    cost: 0,
+    groups: doublets.map(code => ({ type: 'doublet', cards: [code, code], wilds: [] })),
+    leftovers: [],
+    unusedJokers: [],
+    otherCards: rest
+  };
+}
+
+// Joker codes whose combo can be broken: held 2+ times, or one of the four opened-rank cards when all four are held.
+export function comboCodes(cards, openCard) {
+  const counts = countCards(cards);
+  const open = parseCard(openCard);
+  const sameRank = SUITS.map(suit => cardCode(open.rank, suit));
+  const codes = Object.keys(counts).filter(code => code !== PRINTED_JOKER && isJoker(code, openCard) && counts[code] >= 2);
+  if (sameRank.every(code => counts[code])) codes.push(...sameRank);
+  return [...new Set(codes)];
+}
+
+// How many copies of each joker code a grouping plays as itself. A group made only of all the
+// copies of one code (a pure triple of three, a doublet of two) does not count.
+export function naturalUse(groups, cards, openCard) {
+  const counts = countCards(cards);
+  const natural = {};
+  groups.forEach(group => {
+    group.cards.forEach((code, index) => {
+      if (group.wilds.includes(index) || !isJoker(code, openCard)) return;
+      const allCopies = group.cards.every(other => other === code) && group.cards.length === counts[code];
+      if (!allCopies) natural[code] = (natural[code] || 0) + 1;
+    });
+  });
+  return natural;
+}
+
+// For a card list: best[g] = { left, groups } = the fewest cards left out when the cards form exactly g
+// pure sequences (runs of 3-5 in one suit, A-2-3 and Q-K-A, no wrap; or 3 identical cards). No wilds;
+// a printed joker is always left out. Missing index = impossible.
+export function commitPartitions(cards) {
+  const POWERS = Array.from({ length: 13 }, (_, n) => 4 ** n);
+  const printed = cards.filter(code => code === PRINTED_JOKER).length;
+  const perSuit = SUITS.map(suit => {
+    let start = 0;
+    cards.forEach(code => {
+      if (code === PRINTED_JOKER) return;
+      const card = parseCard(code);
+      if (card.suit === suit) start += POWERS[card.rank - 1];
+    });
+    const codeAt = index => cardCode(index + 1, suit);
+    const memo = new Map();
+    function solve(key) {
+      if (key === 0) return [{ left: 0, groups: null }];
+      const known = memo.get(key);
+      if (known) return known;
+      const counts = [];
+      for (let n = 0, rest = key; n < 13; n += 1, rest = Math.floor(rest / 4)) counts.push(rest % 4);
+      const r = counts.findIndex(count => count > 0);
+      const best = [];
+      const offer = (nextKey, left, groupsAdded, group) => {
+        solve(nextKey).forEach((option, g) => {
+          if (!option) return;
+          const total = option.left + left;
+          const k = g + groupsAdded;
+          if (best[k] && best[k].left <= total) return;
+          best[k] = { left: total, groups: group ? { item: group, next: option.groups } : option.groups };
+        });
+      };
+      offer(key - POWERS[r], 1, 0, null); // leave the lowest card out
+      if (counts[r] >= 3) offer(key - 3 * POWERS[r], 0, 1, { type: 'pureTriple', cards: [codeAt(r), codeAt(r), codeAt(r)], wilds: [] });
+      for (let length = 3; length <= 5; length += 1) {
+        const runs = [];
+        if (r + length <= 13) runs.push(Array.from({ length }, (_, k) => r + k));
+        if (r === 0) runs.push([...Array.from({ length: length - 1 }, (_, k) => 14 - length + k), 0]); // ace high
+        runs.forEach(ranks => {
+          if (ranks.some(index => counts[index] === 0)) return;
+          offer(key - ranks.reduce((sum, index) => sum + POWERS[index], 0), 0, 1,
+            { type: 'pureRun', cards: ranks.map(codeAt), wilds: [] });
+        });
+      }
+      memo.set(key, best);
+      return best;
+    }
+    return solve(start);
+  });
+  let combined = [{ left: printed, picks: [] }];
+  perSuit.forEach(options => {
+    const next = [];
+    combined.forEach((so, t) => {
+      if (!so) return;
+      options.forEach((option, u) => {
+        if (!option) return;
+        const left = so.left + option.left;
+        if (next[t + u] && next[t + u].left <= left) return;
+        next[t + u] = { left, picks: [...so.picks, option] };
+      });
+    });
+    combined = next;
+  });
+  return combined.map(option => option && { left: option.left, groups: option.picks.flatMap(pick => toList(pick.groups)) });
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// Whether the shown cards are a valid commit: exactly 5 pure sequences using every card, or exactly
+// the doublet target (8 with 4 players, 9 with 3) and nothing else. openCard is only used for the copy limit.
+export function checkCommit(commitCards, openCard, playerCount) {
+  const cards = commitCards || [];
+  const fail = message => ({ ok: false, route: null, groups: [], message });
+  if (!cards.length) return fail('Enter the cards that were shown');
+  const error = validateCards(cards, openCard);
+  if (error) return fail(error);
+  const parts = commitPartitions(cards);
+  if (parts[COMMIT_SEQUENCES] && parts[COMMIT_SEQUENCES].left === 0) {
+    return { ok: true, route: 'sequences', groups: parts[COMMIT_SEQUENCES].groups, message: '5 pure sequences ✓' };
+  }
+  const targets = doubletTargets(playerCount);
+  const counts = countCards(cards);
+  const pairCodes = Object.keys(counts).filter(code => code !== PRINTED_JOKER && counts[code] >= 2).sort(byOrder);
+  const spare = cards.length - 2 * pairCodes.length;
+  if (targets && pairCodes.length === targets.commit && spare === 0) {
+    return { ok: true, route: 'doublets', message: `${targets.commit} doublets ✓`,
+      groups: pairCodes.map(code => ({ type: 'doublet', cards: [code, code], wilds: [] })) };
+  }
+  let most = 0;
+  for (let g = 1; g <= COMMIT_SEQUENCES; g += 1) if (parts[g]) most = g;
+  const d = pairCodes.length;
+  if (targets && d > most) {
+    if (spare > 0) return fail(`${plural(d, 'doublet')} + ${plural(spare, 'extra card')} ✗`);
+    return fail(d < targets.commit ? `${plural(d, 'doublet')}, need ${targets.commit} ✗`
+      : `${plural(d, 'doublet')}: commit exactly ${targets.commit} ✗`);
+  }
+  const exactMore = parts.findIndex((p, g) => g > COMMIT_SEQUENCES && p && p.left === 0);
+  if (exactMore > 0) return fail(`${exactMore} sequences: commit exactly ${COMMIT_SEQUENCES} ✗`);
+  if (most === 0) return fail('No pure sequence yet ✗');
+  const left = parts[most].left;
+  if (left === 0) return fail(`${plural(most, 'sequence')}, need ${COMMIT_SEQUENCES} ✗`);
+  return fail(`${plural(most, 'sequence')} + ${plural(left, 'extra card')} ✗`);
+}
+
+// Hint only: could these cards have been committed (5 disjoint pure sequences, or enough doublets)?
+export function canCommitFrom(cards, playerCount) {
+  if (validateCards(cards)) return false;
+  const targets = doubletTargets(playerCount);
+  return commitPartitions(cards).some((option, g) => option && g >= COMMIT_SEQUENCES)
+    || Boolean(targets && findDoublets(cards).doublets.length >= targets.commit);
+}
+
+// Finds the grouping of a hand with at least `required` pure sequences that leaves the
 // fewest Hath points (ties on Hath: the most pure triples). Returns null when
-// the hand has no 5 pure sequences, i.e. the player did not commit.
+// the hand has no such grouping. With required = 0 it is the best grouping of any card list
+// (it never returns null then, because "leave out" and "wild" moves always exist).
 // `cost` is the leftover value of the chosen grouping; `minCost` is the lowest
 // leftover value of any grouping (they differ only when a grouping with more
 // pure triples rounds to the same Hath).
@@ -28,7 +226,9 @@ const codeOf = slot => cardCode((slot % 13) + 1, SUITS[Math.floor(slot / 13)]);
 // this round may be played as itself or turned into a wild card. Wild cards
 // may be borrowed before the joker card that supplies them is reached, as long
 // as the balance ends at zero or above.
-export function bestArrangement(cards, openCard) {
+// `protect` holds joker codes that may not be played as themselves, except as all their copies in one
+// pure triple; they can only be wild cards.
+export function bestArrangement(cards, openCard, protect = new Set(), required = COMMIT_SEQUENCES) {
   const counts = new Array(52).fill(0);
   const jokerSlot = new Array(52).fill(false);
   let printed = 0;
@@ -40,7 +240,9 @@ export function bestArrangement(cards, openCard) {
     const card = parseCard(code);
     counts[slotOf(SUITS.indexOf(card.suit), card.rank)] += 1;
   });
+  const totalCount = counts.slice();
   for (let slot = 0; slot < 52; slot += 1) jokerSlot[slot] = isJoker(codeOf(slot), openCard);
+  const protectSlot = Array.from({ length: 52 }, (_, slot) => protect.has(codeOf(slot)));
 
   // The remaining cards are kept as a base-4 number split over two doubles
   // (26 slots each), so a memo key is cheap to build.
@@ -78,13 +280,15 @@ export function bestArrangement(cards, openCard) {
     if (jokerSlot[i]) add([], -1, { type: 'wild', cost: 0, triples: 0, cards: [code] });
     else add([], 0, { type: 'leftover', cost: cardValue(rank), triples: 0, cards: [code] });
 
-    // 2. Pure triple: three identical cards, never completed by a joker.
-    if (counts[i] >= 2) {
+    // 2. Pure triple: three identical cards, never completed by a joker. A protected joker
+    // only makes a triple from all of its copies.
+    if (counts[i] >= 2 && (!protectSlot[i] || counts[i] + 1 === totalCount[i])) {
       add([i, i], 0, { type: 'pureTriple', cost: 0, triples: jokerSlot[i] ? 0 : 1, cards: [code, code, code] });
     }
 
     // 3. Runs of 3-5 in this suit. Positions 1..14 put the ace at 1 (A-2-3) or 14 (Q-K-A); no wrap.
-    const ownPositions = rank === 1 ? [1, 14] : [rank];
+    // A protected joker card is never a natural card in a run.
+    const ownPositions = protectSlot[i] ? [] : rank === 1 ? [1, 14] : [rank];
     ownPositions.forEach(own => {
       for (let length = 3; length <= 5; length += 1) {
         for (let first = Math.max(1, own - length + 1); first <= own && first + length - 1 <= 14; first += 1) {
@@ -100,7 +304,7 @@ export function bestArrangement(cards, openCard) {
               return;
             }
             const slot = slotOf(suitIndex, position === 14 ? 1 : position);
-            if (slot > i && counts[slot] > 0) fill(position + 1, [...slots, slot], [...cards, codeOf(slot)], wilds);
+            if (slot > i && counts[slot] > 0 && !protectSlot[slot]) fill(position + 1, [...slots, slot], [...cards, codeOf(slot)], wilds);
             fill(position + 1, slots, [...cards, WILD], wilds + 1);
           };
           fill(first, [], [], 0);
@@ -109,18 +313,20 @@ export function bestArrangement(cards, openCard) {
     });
 
     // 4. Mixed-suit sets of 3-4: one card per suit; jokers fill the rest.
-    const laterSuits = [];
-    for (let s = suitIndex + 1; s < 4; s += 1) {
-      if (counts[slotOf(s, rank)] > 0) laterSuits.push(slotOf(s, rank));
-    }
-    for (let mask = 0; mask < 1 << laterSuits.length; mask += 1) {
-      const chosen = laterSuits.filter((_, bit) => mask & (1 << bit));
-      for (let size = 3; size <= 4; size += 1) {
-        const wilds = size - 1 - chosen.length;
-        if (wilds < 0 || (wilds > 0 && size > 3)) continue;
-        add(chosen, wilds, {
-          type: 'set', cost: 0, triples: 0, cards: [code, ...chosen.map(codeOf), ...Array(wilds).fill(WILD)]
-        });
+    if (!protectSlot[i]) {
+      const laterSuits = [];
+      for (let s = suitIndex + 1; s < 4; s += 1) {
+        if (counts[slotOf(s, rank)] > 0 && !protectSlot[slotOf(s, rank)]) laterSuits.push(slotOf(s, rank));
+      }
+      for (let mask = 0; mask < 1 << laterSuits.length; mask += 1) {
+        const chosen = laterSuits.filter((_, bit) => mask & (1 << bit));
+        for (let size = 3; size <= 4; size += 1) {
+          const wilds = size - 1 - chosen.length;
+          if (wilds < 0 || (wilds > 0 && size > 3)) continue;
+          add(chosen, wilds, {
+            type: 'set', cost: 0, triples: 0, cards: [code, ...chosen.map(codeOf), ...Array(wilds).fill(WILD)]
+          });
+        }
       }
     }
     // Try the moves most likely to lead to a low score first, so the bound tightens early.
@@ -186,10 +392,10 @@ export function bestArrangement(cards, openCard) {
     for (let j = i; j < 52; j += 1) if (jokerSlot[j]) convertible += counts[j];
     if (wild + convertible < 0) return null;
     if (i === 52) {
-      if (wild < 0 || pure < COMMIT_SEQUENCES || budget <= 0) return null;
+      if (wild < 0 || pure < required || budget <= 0) return null;
       return { score: 0, cost: 0, triples: 0, groups: null };
     }
-    if (pure < COMMIT_SEQUENCES && pure + pureCapacity() < COMMIT_SEQUENCES) return null;
+    if (pure < required && pure + pureCapacity() < required) return null;
 
     const key = `${low},${high},${wild},${pure},${room}`;
     const known = memo.get(key);
@@ -209,7 +415,7 @@ export function bestArrangement(cards, openCard) {
       const limit = (best ? best.score : budget) - moveScore;
       move.slots.forEach(slot => take(slot));
       const isPure = move.type === 'pureRun' || move.type === 'pureTriple';
-      const result = solve(wild - move.wilds, isPure ? Math.min(COMMIT_SEQUENCES, pure + 1) : pure, limit, room - move.cost);
+      const result = solve(wild - move.wilds, isPure ? Math.min(required, pure + 1) : pure, limit, room - move.cost);
       move.slots.forEach(slot => put(slot));
       if (result) {
         best = {
@@ -272,60 +478,251 @@ export function bestArrangement(cards, openCard) {
   };
 }
 
-// Hath and Joker points for one 30-card hand.
-export function scoreHand(cards, openCard) {
-  const error = validateOpenCard(openCard) || validateHand(cards, openCard);
-  if (error) return { error };
-  const jokers = jokerCardPoints(cards, openCard);
-  const arrangement = bestArrangement(cards, openCard);
-
-  if (arrangement) {
-    const triplesPoints = triplePoints(arrangement.triples);
-    return {
-      committed: true,
-      closed: arrangement.minCost === 0,
-      hathValue: arrangement.cost,
-      hath: hathFromValue(arrangement.cost),
-      triples: arrangement.triples,
-      triplePoints: triplesPoints,
-      jokerCardPoints: jokers.points,
-      jokerPoints: jokers.points + triplesPoints,
-      jokerParts: jokers.parts,
-      groups: arrangement.groups,
-      leftovers: arrangement.leftovers,
-      unusedJokers: arrangement.unusedJokers
-    };
-  }
-
-  // Not committed: every non-joker card counts, except pure triples.
-  const counts = countCards(cards);
-  let value = 0;
-  let triples = 0;
-  const groups = [];
-  const leftovers = [];
-  Object.keys(counts).sort().forEach(code => {
-    if (isJoker(code, openCard)) return;
-    if (counts[code] === 3) {
-      triples += 1;
-      groups.push({ type: 'pureTriple', cards: [code, code, code], wilds: [] });
-      return;
+// Not committed: pure runs of 4-5 (one suit, no wilds; a joker card may be itself; A-2-3-4 and
+// J-Q-K-A, no wrap) and pure triples leave Hath. Lowest Hath, then most pure triples, then lowest value.
+export function freeRunArrangement(cards, openCard, protect = new Set()) {
+  const POWERS = Array.from({ length: 13 }, (_, n) => 4 ** n);
+  const perSuit = SUITS.map(suit => {
+    let start = 0;
+    cards.forEach(code => {
+      if (code === PRINTED_JOKER) return;
+      const card = parseCard(code);
+      if (card.suit === suit) start += POWERS[card.rank - 1];
+    });
+    const codeAt = index => cardCode(index + 1, suit);
+    const joker = POWERS.map((_, index) => isJoker(codeAt(index), openCard));
+    const blocked = POWERS.map((_, index) => protect.has(codeAt(index)));
+    const memo = new Map();
+    // best[t] = lowest leftover value using exactly t pure triples, for the cards left in this suit.
+    function solve(key) {
+      if (key === 0) return [{ value: 0, groups: null, left: null }];
+      const known = memo.get(key);
+      if (known) return known;
+      const counts = [];
+      for (let n = 0, rest = key; n < 13; n += 1, rest = Math.floor(rest / 4)) counts.push(rest % 4);
+      const r = counts.findIndex(count => count > 0);
+      const best = [];
+      const offer = (nextKey, value, triples, group, leftover) => {
+        solve(nextKey).forEach((option, t) => {
+          if (!option) return;
+          const total = option.value + value;
+          if (best[t + triples] && best[t + triples].value <= total) return;
+          best[t + triples] = {
+            value: total,
+            groups: group ? { item: group, next: option.groups } : option.groups,
+            left: leftover ? { item: leftover, next: option.left } : option.left
+          };
+        });
+      };
+      // The lowest card is charged (joker cards cost nothing), or starts a triple or a run.
+      offer(key - POWERS[r], joker[r] ? 0 : cardValue(r + 1), 0, null, codeAt(r));
+      if (counts[r] >= 3 && !joker[r]) {
+        offer(key - 3 * POWERS[r], 0, 1, { type: 'pureTriple', cards: [codeAt(r), codeAt(r), codeAt(r)], wilds: [] }, null);
+      }
+      for (let length = FREE_RUN_MIN; length <= FREE_RUN_MAX; length += 1) {
+        const runs = [];
+        if (r + length <= 13) runs.push(Array.from({ length }, (_, k) => r + k));
+        if (r === 0) runs.push([...Array.from({ length: length - 1 }, (_, k) => 14 - length + k), 0]); // ace high
+        runs.forEach(ranks => {
+          if (ranks.some(index => counts[index] === 0 || blocked[index])) return;
+          const used = ranks.reduce((sum, index) => sum + POWERS[index], 0);
+          offer(key - used, 0, 0, { type: 'pureRun', cards: ranks.map(codeAt), wilds: [] }, null);
+        });
+      }
+      memo.set(key, best);
+      return best;
     }
-    value += cardValue(parseCard(code).rank) * counts[code];
-    for (let n = 0; n < counts[code]; n += 1) leftovers.push(code);
+    return solve(start);
   });
+
+  let combined = [{ value: 0, picks: [] }];
+  perSuit.forEach(options => {
+    const next = [];
+    combined.forEach((so, t) => {
+      if (!so) return;
+      options.forEach((option, u) => {
+        if (!option) return;
+        const value = so.value + option.value;
+        if (next[t + u] && next[t + u].value <= value) return;
+        next[t + u] = { value, picks: [...so.picks, option] };
+      });
+    });
+    combined = next;
+  });
+  // Rising t means more triples, so "<=" keeps the most triples at the lowest Hath.
+  let chosen = null;
+  let triples = 0;
+  combined.forEach((option, t) => {
+    if (!option) return;
+    if (!chosen || hathFromValue(option.value) <= hathFromValue(chosen.value)) {
+      chosen = option;
+      triples = t;
+    }
+  });
+  const spare = chosen.picks.flatMap(pick => toList(pick.left));
+  return {
+    cost: chosen.value,
+    triples,
+    groups: chosen.picks.flatMap(pick => toList(pick.groups)),
+    leftovers: spare.filter(code => !isJoker(code, openCard)),
+    unusedJokers: [...spare.filter(code => isJoker(code, openCard)), ...cards.filter(code => code === PRINTED_JOKER)]
+  };
+}
+
+// Closed beats open, then higher Joker - Hath, then lower Hath; a full tie keeps the earlier one
+// (within a route the earlier grouping, across routes the sequences route).
+function beats(a, b) {
+  if (a.closed !== b.closed) return a.closed;
+  const scoreA = a.jokerPoints - a.hath;
+  const scoreB = b.jokerPoints - b.hath;
+  if (scoreA !== scoreB) return scoreA > scoreB;
+  return a.hath < b.hath;
+}
+
+// Joker points, Hath and the joker split for one grouping. Its natural cards decide which combos break.
+function evaluate(arrangement, { closed, triples }, cards, openCard, fixed = []) {
+  const combos = comboCodes(cards, openCard);
+  const natural = naturalUse([...fixed, ...arrangement.groups], cards, openCard);
+  const own = naturalUse(arrangement.groups, cards, openCard); // only these can be protected
+  const jokers = jokerCardPoints(cards, openCard, natural);
   const triplesPoints = triplePoints(triples);
   return {
-    committed: false,
-    closed: false,
-    hathValue: value,
-    hath: hathFromValue(value),
+    arrangement,
+    closed,
     triples,
-    triplePoints: triplesPoints,
-    jokerCardPoints: jokers.points,
+    triplesPoints,
+    jokers,
+    hath: hathFromValue(arrangement.cost),
     jokerPoints: jokers.points + triplesPoints,
+    brokenCombos: jokers.broken.filter(code => combos.includes(code)),
+    // Combo codes played as themselves anywhere, even when the opened run happens to absorb them:
+    // protecting one can still free a better split, so the search tries each.
+    playedCombos: combos.filter(code => own[code] > 0)
+  };
+}
+
+// Each route starts with nothing protected. When the best grouping breaks a combo, the search also
+// protects the broken codes (every reachable subset, breadth first), so a grouping can keep a combo
+// whole. Returns the best grouping found, or null when the route does not commit.
+function bestOfRoute(run, describe, cards, openCard, fixed = []) {
+  const keyOf = protect => [...protect].sort().join(',');
+  const seen = new Set([keyOf(new Set())]);
+  const queue = [new Set()];
+  let best = null;
+  for (let tried = 0; queue.length && tried < MAX_PROTECT_SEARCH; tried += 1) {
+    const protect = queue.shift();
+    const arrangement = run(protect);
+    if (!arrangement) continue;
+    const found = evaluate(arrangement, describe(arrangement), cards, openCard, fixed);
+    if (!best || beats(found, best)) best = found;
+    found.playedCombos.forEach(code => {
+      const next = new Set([...protect, code]);
+      if (protect.has(code) || seen.has(keyOf(next))) return;
+      seen.add(keyOf(next));
+      queue.push(next);
+    });
+  }
+  return best;
+}
+
+// The result for one route. Its fields come from the chosen grouping.
+function report(route, committed, found, cards, playerCount) {
+  const { arrangement, jokers } = found;
+  return {
+    route,
+    committed,
+    closed: found.closed,
+    hathValue: arrangement.cost,
+    hath: found.hath,
+    triples: found.triples,
+    triplePoints: found.triplesPoints,
+    jokerPoints: found.jokerPoints,
+    jokerCardPoints: jokers.points,
     jokerParts: jokers.parts,
-    groups,
-    leftovers,
-    unusedJokers: cards.filter(code => isJoker(code, openCard))
+    brokenCombos: found.brokenCombos,
+    doublets: route === 'doublets' ? arrangement.groups.length : findDoublets(cards).doublets.length,
+    doubletTarget: doubletTargets(playerCount),
+    groups: arrangement.groups,
+    leftovers: arrangement.leftovers,
+    unusedJokers: arrangement.unusedJokers,
+    otherCards: arrangement.otherCards || []
+  };
+}
+
+// Hath and Joker points for one 30-card hand. playerCount (3 or 4) turns on the doublets route.
+export function scoreHand(cards, openCard, playerCount) {
+  const error = validateOpenCard(openCard) || validateHand(cards, openCard);
+  if (error) return { error };
+  const candidates = [];
+  const sequences = bestOfRoute(
+    protect => bestArrangement(cards, openCard, protect),
+    arrangement => ({ closed: arrangement.minCost === 0, triples: arrangement.triples }),
+    cards, openCard
+  );
+  if (sequences) candidates.push(report('sequences', true, sequences, cards, playerCount));
+  const counts = countCards(cards);
+  const tripleCount = DOUBLETS_SCORE_TRIPLES
+    ? Object.keys(counts).filter(code => counts[code] === 3 && !isJoker(code, openCard)).length
+    : 0;
+  const pairs = bestOfRoute(
+    protect => doubletArrangement(cards, openCard, playerCount, protect),
+    arrangement => ({ closed: arrangement.closed, triples: tripleCount }),
+    cards, openCard
+  );
+  if (pairs) candidates.push(report('doublets', true, pairs, cards, playerCount));
+  if (candidates.length) return candidates.reduce((best, next) => (beats(next, best) ? next : best));
+  return notCommitted(cards, openCard, playerCount);
+}
+
+function notCommitted(cards, openCard, playerCount) {
+  const free = bestOfRoute(
+    protect => freeRunArrangement(cards, openCard, protect),
+    arrangement => ({ closed: false, triples: arrangement.triples }),
+    cards, openCard
+  );
+  return report(null, false, free, cards, playerCount);
+}
+
+// No Committed tick: all 30 cards, the not-committed rule only (never the sequences or doublets routes).
+export function scoreNotCommitted(cards, openCard, playerCount) {
+  const error = validateOpenCard(openCard) || validateHand(cards, openCard);
+  if (error) return { error };
+  return notCommitted(cards, openCard, playerCount);
+}
+
+// A committed player: the commit cards are locked as checked by checkCommit; Hath comes from the Bandh
+// cards only; Joker points from all 30 cards (locked groups count as natural use).
+export function scoreCommitted(commitCards, bandhCards, openCard, playerCount) {
+  const commit = checkCommit(commitCards, openCard, playerCount);
+  if (!commit.ok) return { error: `Committed cards: ${commit.message}` };
+  const bandh = bandhCards || [];
+  const need = HAND_SIZE - commitCards.length;
+  if (bandh.length !== need) return { error: `Bandh cards: ${bandh.length} of ${need}.` };
+  const all = [...commitCards, ...bandh];
+  const error = validateOpenCard(openCard) || validateHand(all, openCard);
+  if (error) return { error };
+  if (commit.route === 'sequences') {
+    const lockedTriples = commit.groups.filter(group => group.type === 'pureTriple' && !isJoker(group.cards[0], openCard)).length;
+    const found = bestOfRoute(
+      protect => bestArrangement(bandh, openCard, protect, 0),
+      arrangement => ({ closed: arrangement.minCost === 0, triples: lockedTriples + arrangement.triples }),
+      all, openCard, commit.groups
+    );
+    return { ...report('sequences', true, found, all, playerCount), lockedGroups: commit.groups };
+  }
+  // Doublets: Hath 0; Bandh doublets only prove the close and never break a combo.
+  const { doublets, rest } = findDoublets(bandh);
+  const natural = naturalUse(commit.groups, all, openCard);
+  const jokers = jokerCardPoints(all, openCard, natural);
+  const combos = comboCodes(all, openCard);
+  return {
+    route: 'doublets', committed: true, closed: doublets.length >= DOUBLET_CLOSE_EXTRA,
+    hathValue: 0, hath: 0, triples: 0, triplePoints: 0,
+    jokerPoints: jokers.points, jokerCardPoints: jokers.points, jokerParts: jokers.parts,
+    brokenCombos: jokers.broken.filter(code => combos.includes(code)),
+    doublets: commit.groups.length + doublets.length, doubletTarget: doubletTargets(playerCount),
+    lockedGroups: commit.groups,
+    groups: doublets.map(code => ({ type: 'doublet', cards: [code, code], wilds: [] })),
+    leftovers: [], unusedJokers: [], otherCards: rest
   };
 }
