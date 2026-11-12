@@ -1,0 +1,13 @@
+# OS / editor junk
+.DS_Store
+
+# dependencies (each app has its own package.json)
+node_modules/
+
+# production builds and coverage
+build/
+coverage/
+
+# python
+__pycache__/
+.pytest_cache/
