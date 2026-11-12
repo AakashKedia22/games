@@ -46,8 +46,10 @@ export function triplePoints(count) {
 }
 
 // Best Joker points from the joker cards in a hand. Each card counts toward one
-// bonus at most; the split with the most points wins.
-export function jokerCardPoints(cards, openCard) {
+// bonus at most; the split with the most points wins. `natural` maps a joker code to
+// the copies played as themselves in a breaking way: those earn only their single
+// value, and the rest of the copies still pool for the copies bonus.
+export function jokerCardPoints(cards, openCard, natural = {}) {
   const counts = countCards(cards);
   const open = parseCard(openCard);
   const jokerCodes = Object.keys(counts).filter(code => isJoker(code, openCard)).sort();
@@ -63,16 +65,26 @@ export function jokerCardPoints(cards, openCard) {
       sameRank.forEach(code => { used[code] = (used[code] || 0) + fours; });
       runCodes.forEach(code => { used[code] = (used[code] || 0) + runs; });
       if (Object.keys(used).some(code => used[code] > have(code))) continue;
+      if (sameRank.some(code => fours > have(code) - (natural[code] || 0))) continue;
       const parts = [];
+      const broken = [];
       if (fours) parts.push({ label: `All four ${formatCard(openCard).slice(0, -1)}s`, count: fours, points: fours * FOUR_OF_RANK_POINTS });
       if (runs) parts.push({ label: `Run ${runCodes.map(formatCard).join(' ')}`, count: runs, points: runs * OPENED_RUN_POINTS });
       jokerCodes.forEach(code => {
-        const left = have(code) - (used[code] || 0);
-        const points = copiesPoints(JOKER_VALUES[jokerKind(code, openCard)], left);
-        if (left > 0) parts.push({ label: `${formatCard(code)} ×${left}`, count: left, points });
+        const left = have(code) - (used[code] || 0);                 // after fours and runs
+        // The opened run takes natural copies first, so they aren't wasted as singles.
+        const naturalLeft = Math.max(0, Math.min(left, (natural[code] || 0) - runs * (runCodes.includes(code) ? 1 : 0)));
+        const pooled = left - naturalLeft;
+        const value = JOKER_VALUES[jokerKind(code, openCard)];
+        const points = copiesPoints(value, pooled) + naturalLeft * value;
+        if (naturalLeft > 0) broken.push(code);
+        if (left > 0) {
+          const label = `${formatCard(code)} ×${left}${naturalLeft && left > 1 ? ` (${naturalLeft} played as itself)` : ''}`;
+          parts.push({ label, count: left, points });
+        }
       });
       const points = parts.reduce((sum, part) => sum + part.points, 0);
-      if (!best || points > best.points) best = { points, parts };
+      if (!best || points > best.points) best = { points, parts, broken };
     }
   }
   return best;

@@ -62,6 +62,29 @@ test('a card counts toward one bonus only, and the best split wins', () => {
   expect(result.parts.map(part => part.points).reduce((a, b) => a + b, 0)).toBe(27);
 });
 
+test('a copy played as itself breaks the pair: 6♦ ×3 with one 6♦ in a run is 6 + 2', () => {
+  expect(jokerCardPoints(['6D', '6D', '6D'], '7D', { '6D': 1 }).points).toBe(8);
+  expect(jokerCardPoints(['6D', '6D', '6D'], '7D', { '6D': 1 }).broken).toEqual(['6D']);
+  expect(jokerCardPoints(['6D', '6D', '6D'], '7D').points).toBe(14);
+});
+
+test('a 0-value card played as itself earns nothing extra', () => {
+  expect(jokerCardPoints(['5H', '5H', '5H'], '5S', { '5H': 1 }).points).toBe(0);
+});
+
+test('a natural four of the opened rank is not allowed, so the singles count', () => {
+  // Unrestricted, the four 7s are 14. With one 7♣ played as itself they are singles: 7♥ 2 + 7♣ 0 + 7♠ 0 + 7♦ 4.
+  expect(points(['7H', '7C', '7S', '7D'])).toBe(14);
+  expect(jokerCardPoints(['7H', '7C', '7S', '7D'], '7D', { '7C': 1 }).points).toBe(6);
+});
+
+test('the opened run takes natural copies, so they do not break it', () => {
+  // 5♦ 6♦ 7♦ 8♦ 9♦ is the run (25) and takes the natural 6♦; the spare 6♦ is a single (2).
+  const cards = ['5D', '6D', '7D', '8D', '9D', '6D'];
+  expect(jokerCardPoints(cards, '7D', { '6D': 1 }).points).toBe(25 + 2);
+  expect(jokerCardPoints(cards, '7D', { '6D': 1 }).broken).toEqual([]);
+});
+
 test('pure triple points', () => {
   expect([0, 1, 2, 3, 4, 5, 6].map(triplePoints)).toEqual([0, 2, 6, 14, 20, 25, 25]);
 });
