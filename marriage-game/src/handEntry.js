@@ -29,10 +29,12 @@ export function addCard(cards, code, openCard, { limit = HAND_SIZE, otherCards =
 export const commitLimit = cards => Math.min(MAX_COMMIT_CARDS, HAND_SIZE - (cards || []).length);
 export const restLimit = commitCards => HAND_SIZE - (commitCards || []).length;
 
-// The card fields a draft entry saves.
-export function entryCardFields({ commitCards = [], cards = [], committed = false }) {
+// The card fields a draft entry saves. legacy: a saved pre-v4f entry re-saved with its cards untouched
+// stays without a committed flag, so an old closer can still be re-saved.
+export function entryCardFields({ commitCards = [], cards = [], committed = false, legacy = false }) {
   if (committed) return { committed: true, commitCards: sortCards(commitCards), cards: sortCards(cards) };
   const all = sortCards([...commitCards, ...cards]);
+  if (legacy && !commitCards.length) return all.length ? { cards: all } : {};
   return all.length ? { committed: false, cards: all } : {};
 }
 

@@ -503,7 +503,7 @@ button:focus-visible, input:focus-visible {
   border: 1px solid var(--line);
   border-radius: 10px;
 }
-.card-picker-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.card-picker-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; }
 .card-picker-head button { margin: 0; }
 .hand-full { color: var(--green-dark); }
 .suit-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
@@ -559,7 +559,7 @@ button:focus-visible, input:focus-visible {
 .card-chip.red { color: #c0392b; }
 .card-chip.static { display: inline-flex; align-items: center; min-height: 0; }
 .card-chip.wild-card { background: #fff8df; border-color: var(--gold); }
-.hand-summary { font-size: .88rem; }
+.hand-summary { font-size: .88rem; overflow-wrap: anywhere; }
 .hand-summary summary { cursor: pointer; font-weight: 600; color: var(--green-dark); }
 .group-list { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; }
 .group-type { min-width: 76px; color: var(--muted); font-size: .78rem; align-self: center; }

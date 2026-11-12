@@ -214,4 +214,9 @@ test('isValidEntryCards checks the card fields of one entry', () => {
   assert.equal(isValidEntryCards({ player: 'A', commitCards: FIVE_CODES }), false);
   assert.equal(isValidEntryCards({ player: 'A', committed: true, commitCards: [...THIRTY.slice(0, 26)] }), false);
   assert.equal(isValidEntryCards(null), false);
+  assert.equal(isValidEntryCards({ player: 'A', cards: ['2S', '2S', '2S', '2S'] }), false);
+  assert.equal(isValidEntryCards({ player: 'A', committed: true, commitCards: ['2S', '2S'], cards: ['2S', '2S'] }), false);
+  assert.equal(isValidEntryCards({ player: 'A', cards: ['2S', '2S', '2S'] }), true);
+  assert.equal(isValidEntryCards({ player: 'A', cards: ['2S', '2S', '2S'] }, '2S'), false);
+  assert.equal(isValidEntryCards({ player: 'A', cards: ['2S', '2S'] }, '2S'), true);
 });

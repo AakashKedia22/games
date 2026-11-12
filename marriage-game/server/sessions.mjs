@@ -19,6 +19,30 @@ export function isValidGameState(state) {
     state.rounds.every(round => round && Array.isArray(round.entries));
 }
 
+const CARD_CODE = /^(?:(?:A|[2-9]|10|J|Q|K)[SHDC]|JK)$/;
+const isCardList = (list, max) => Array.isArray(list) && list.length <= max && list.every(code => typeof code === 'string' && CARD_CODE.test(code));
+
+// Optional card fields on a round entry (v4a cards, v4f commitCards/committed).
+// A hand is dealt from 3 decks: at most 3 of any card, and 2 of the round's opened card.
+function withinCopies(entry, openCard) {
+  const counts = {};
+  [...(entry.cards || []), ...(entry.commitCards || [])].forEach(code => { counts[code] = (counts[code] || 0) + 1; });
+  return Object.keys(counts).every(code => counts[code] <= (code === openCard ? 2 : 3));
+}
+
+export function isValidEntryCards(entry, openCard) {
+  if (!entry || typeof entry !== 'object') return false;
+  if (entry.cards !== undefined && !isCardList(entry.cards, 30)) return false;
+  if (entry.commitCards !== undefined && !isCardList(entry.commitCards, 25)) return false;
+  if (entry.committed !== undefined && typeof entry.committed !== 'boolean') return false;
+  if (entry.commitCards !== undefined && entry.committed !== true) return false;
+  return (entry.cards || []).length + (entry.commitCards || []).length <= 30 && withinCopies(entry, openCard);
+}
+
+export function hasValidCards(state) {
+  return state.rounds.every(round => round.entries.every(entry => isValidEntryCards(entry, round.openCard)));
+}
+
 export function isValidArchivedGame(game) {
   return Boolean(game) && Number.isFinite(game.finishedAt) &&
     isValidGameState({ players: game.players, settings: {}, rounds: game.rounds }) &&
@@ -65,7 +89,7 @@ function pushUndo(session) {
 }
 
 export function applyUpdate(session, state) {
-  if (!isValidGameState(state)) return false;
+  if (!isValidGameState(state) || !hasValidCards(state)) return false;
   pushUndo(session);
   const next = clone({ players: state.players, settings: state.settings, rounds: state.rounds });
   session.players = next.players;

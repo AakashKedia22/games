@@ -438,7 +438,7 @@ function App() {
       bandh: bandh === player,
       hath: bandh === player ? 0 : packed[player] ? PACK_HATH : (!hathInputs[player] ? 0 : Number(hathInputs[player])),
       joker: jokerInputs[player] ? Number(jokerInputs[player]) : 0,
-      ...entryCardFields(entryOf(player)),
+      ...entryCardFields({ ...entryOf(player), legacy: Boolean(legacyCards[player]) }),
       ...(packed[player] ? { packed: true } : {})
     }))
   };

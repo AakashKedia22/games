@@ -2,6 +2,7 @@ import {
   addCard, commitHint, entryCardFields, entryCardState, handFill, handHathBack, isRedCode, maxCopies, openCardOptions,
   removeCard, scoreEntryCached, scoreHandCached, sortCards
 } from './handEntry';
+import { validateRound } from './scoring';
 
 const FIVE = '2S 3S 4S 9H 10H JH 2C 3C 4C 10D JD QD 9C 10C JC'.split(' ');
 const CA = '6H 7H 8H 8H 9H 10H AH 2H 3H 4H 8S 9S 10S 2C 2C 2C'.split(' ');
@@ -108,6 +109,13 @@ test('entryCardFields saves the committed fields, or the cards of an un-ticked p
   expect(entryCardFields({})).toEqual({});
 });
 
+test('entryCardFields keeps an untouched legacy entry without a committed flag', () => {
+  expect(entryCardFields({ cards: ['3S', '2S'], legacy: true })).toEqual({ cards: ['2S', '3S'] });
+  expect(entryCardFields({ cards: ['2S'], committed: true, commitCards: ['3S'], legacy: true }))
+    .toEqual({ committed: true, commitCards: ['3S'], cards: ['2S'] });
+  expect(entryCardFields({ commitCards: ['3S'], cards: ['2S'], legacy: true })).toEqual({ committed: false, cards: ['2S', '3S'] });
+});
+
 test('entryCardState reads legacy entries as un-ticked, and saved entries as they were stored', () => {
   expect(entryCardState({ cards: USER })).toEqual({ commitCards: [], cards: USER, committed: false, legacy: true });
   expect(entryCardState({ committed: false, cards: USER })).toMatchObject({ legacy: false });
@@ -131,4 +139,15 @@ test('commitHint: a full un-ticked hand that holds five sequences, and nothing e
   expect(commitHint({ commitCards: CA, cards: minus(USER, CA), committed: true }, 4)).toBe(false);
   expect(commitHint({ cards: USER.slice(1) }, 4)).toBe(false);
   expect(commitHint({ cards: FIVE.slice(0, 12) }, 4)).toBe(false);
+});
+
+test('a legacy round whose Bandh closer has cards can be re-saved on Edit, a new one needs the tick', () => {
+  const entries = fields => [
+    { player: 'A', bandh: true, hath: 0, joker: 3, ...fields },
+    { player: 'B', bandh: false, hath: 5, joker: 0 }
+  ];
+  const legacy = entryCardState({ cards: USER });
+  expect(validateRound(['A', 'B'], { openCard: '5S', entries: entries(entryCardFields(legacy)) })).toBeNull();
+  const fresh = { commitCards: [], cards: USER, committed: false };
+  expect(validateRound(['A', 'B'], { openCard: '5S', entries: entries(entryCardFields(fresh)) })).toMatch(/did not tick Committed/);
 });
