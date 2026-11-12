@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-from detect import CARD_H, CARD_W, find_cards, order_corners
+from detect import CARD_H, CARD_W, find_cards, find_cards_with_edges, order_corners
 
 
 def table(width=1600, height=1200, seed=0):
@@ -18,8 +18,13 @@ def draw_card(image, centre, size=(120, 170), angle=0.0, label='A'):
     rect = (centre, size, angle)
     box = cv2.boxPoints(rect).astype(np.int32)
     cv2.fillPoly(image, [box], (235, 235, 235))
-    cv2.putText(image, label, (int(centre[0] - 20), int(centre[1] + 10)), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (20, 20, 20), 3)
+    if label:
+        cv2.putText(image, label, (int(centre[0] - 20), int(centre[1] + 10)), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (20, 20, 20), 3)
     return box
+
+
+def draw_quad(image, corners):
+    cv2.fillPoly(image, [np.int32(corners)], (235, 235, 235))
 
 
 def test_order_corners():
@@ -107,6 +112,48 @@ def test_crop_is_not_mirrored():
         assert xs.mean() < CARD_W / 2 and ys.mean() < CARD_H / 2
 
 
+def test_tilted_card_is_found():
+    """A card photographed at an angle is a trapezoid; it is still found at any rotation."""
+    trapezoid = np.array([[-45, -107.5], [45, -107.5], [75, 107.5], [-75, 107.5]])
+    for angle in (0, 30, 60, 90, 135, 200):
+        image = table(600, 600)
+        theta = np.deg2rad(angle)
+        rot = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+        draw_quad(image, trapezoid @ rot.T + np.array([300, 300]))
+        cards = find_cards(image)
+        assert len(cards) == 1, angle
+        assert cards[0]['crop'].mean() > 200, angle
+
+
+def test_small_cards_are_found():
+    image = table(1600, 1200)
+    for row in range(5):
+        for col in range(6):
+            draw_card(image, (150 + col * 240, 140 + row * 230), size=(44, 62), angle=(row * 6 + col) % 7 - 3, label='')
+    assert len(find_cards(image)) == 30
+
+
+def test_cards_cut_by_the_photo_edge_are_ignored_and_counted():
+    image = table(800, 600)
+    draw_card(image, (40, 300))  # cut off by the left edge
+    draw_card(image, (400, 300))
+    cards, ignored = find_cards_with_edges(image)
+    assert len(cards) == 1
+    assert abs(cards[0]['corners'].mean(axis=0)[0] - 400) < 8
+    assert ignored == 1
+    assert len(find_cards(image)) == 1
+
+
+def test_dented_shape_at_the_photo_edge_is_not_counted_as_a_cut_card():
+    image = table(800, 600)
+    draw_card(image, (400, 300))
+    # an L-shaped light patch on the left edge: card-sized, but not a card
+    cv2.fillPoly(image, [np.array([[0, 100], [90, 100], [90, 160], [40, 160], [40, 260], [0, 260]], np.int32)], (235, 235, 235))
+    cards, ignored = find_cards_with_edges(image)
+    assert len(cards) == 1
+    assert ignored == 0
+
+
 def test_reading_order_with_uneven_rows():
     """Two rows whose cards sit at slightly different heights still read left to right, row by row."""
     image = table(1000, 700)
@@ -116,3 +163,21 @@ def test_reading_order_with_uneven_rows():
     got = [tuple(card['corners'].mean(axis=0).round()) for card in find_cards(image)]
     assert [round(x / 50) for x, _ in got] == [round(x / 50) for x, _ in layout]
     assert [y < 330 for _, y in got] == [True] * 4 + [False] * 4
+
+
+def test_reading_order_of_a_tilted_5_5_3_layout():
+    """Rows of 5, 5 and 3 stay in reading order when the whole layout is turned by up to 30 degrees."""
+    from detect import _reading_order
+
+    for degrees in (-30, -15, -12, 0, 12, 15, 30):
+        angle = np.radians(degrees)
+        turn = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+        quads = []
+        for row, count in enumerate((5, 5, 3)):
+            for column in range(count):
+                centre = turn @ np.array([column * 150.0, row * 215.0]) + 500
+                box = np.array([[-70, -100], [70, -100], [70, 100], [-70, 100]], float) @ turn.T + centre
+                quads.append(order_corners(box))
+        shuffled = np.random.default_rng(0).permutation(len(quads))
+        got = _reading_order([quads[i] for i in shuffled])
+        assert [next(k for k, q in enumerate(quads) if q is out) for out in got] == list(range(13)), degrees

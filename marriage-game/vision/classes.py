@@ -5,6 +5,7 @@ SUITS = ['S', 'H', 'D', 'C']
 RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']
 JOKER = 'JK'
 CODES = [rank + suit for suit in SUITS for rank in RANKS] + [JOKER]
+MAX_COPIES = 3  # a deck has three of each card (and the printed jokers come three at a time)
 
 _RANK_WORDS = {
     'ace': 'A', 'two': '2', 'three': '3', 'four': '4', 'five': '5', 'six': '6', 'seven': '7',

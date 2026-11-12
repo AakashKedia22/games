@@ -27,6 +27,8 @@
     "vision:setup-train": "uv pip install --python vision/.venv/bin/python -r vision/requirements-train.txt",
     "vision:test": "cd vision && .venv/bin/python -m pytest -q",
     "vision:train": "vision/.venv/bin/python vision/train.py",
+    "vision:capture": "vision/.venv/bin/python vision/capture_deck.py",
+    "vision:evaluate": "vision/.venv/bin/python vision/evaluate.py",
     "eject": "react-scripts eject",
     "prod": "npm run build && node server.mjs"
   },

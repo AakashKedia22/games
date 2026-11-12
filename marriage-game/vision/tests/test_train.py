@@ -1,6 +1,5 @@
 import json
 
-import cv2
 import numpy as np
 import pytest
 
@@ -8,60 +7,51 @@ pytest.importorskip('torch')
 pytest.importorskip('timm')
 
 import onnxruntime as ort  # noqa: E402
+import torch  # noqa: E402
 
 import train  # noqa: E402
 from classes import CODES  # noqa: E402
+from corner_models import build_detector  # noqa: E402
 
 
-def fake_dataset(root):
-    """A few coloured 'cards' per class in the Kaggle folder layout."""
-    rng = np.random.default_rng(0)
-    for split, count in (('train', 4), ('valid', 2), ('test', 2)):
-        for name in ('ace of spades', 'ten of hearts', 'joker', 'not a card folder'):
-            folder = root / split / name
-            folder.mkdir(parents=True)
-            for i in range(count):
-                image = np.full((224, 224, 3), rng.integers(0, 255, size=3), np.uint8)
-                cv2.imwrite(str(folder / f'{i}.jpg'), image)
+def test_detector_returns_losses_in_train_mode():
+    model = build_detector(pretrained=False, train_size=320)
+    model.train()
+    image = torch.rand(3, 320, 320)
+    target = {'boxes': torch.tensor([[50.0, 60.0, 110.0, 160.0]]), 'labels': torch.tensor([1])}
+    losses = model([image], [target])
+    assert isinstance(losses, dict)
+    assert 'loss_classifier' in losses and 'loss_box_reg' in losses
 
 
-def test_collect_maps_folders_and_repeats_samples(tmp_path):
-    fake_dataset(tmp_path / 'cards')
-    items = train.collect(str(tmp_path / 'cards' / 'train'))
-    assert sorted({label for _, label in items}) == sorted(CODES.index(code) for code in ('AS', '10H', 'JK'))
-    samples = tmp_path / 'samples' / '7D'
-    samples.mkdir(parents=True)
-    cv2.imwrite(str(samples / 'a.jpg'), np.zeros((300, 200, 3), np.uint8))
-    assert train.collect(str(tmp_path / 'samples'), repeat=3) == [(str(samples / 'a.jpg'), CODES.index('7D'))] * 3
-    assert train.collect(str(tmp_path / 'missing')) == []
-
-
-def test_tiny_training_run_exports_a_working_model(tmp_path):
-    fake_dataset(tmp_path / 'cards')
+def test_tiny_training_run_exports_both_models_that_run(tmp_path):
     out = tmp_path / 'models'
+    nothing = str(tmp_path / 'none')
     metrics = train.main([
-        '--data', str(tmp_path / 'cards'), '--samples', str(tmp_path / 'none'), '--out', str(out),
-        '--epochs', '1', '--batch', '8', '--workers', '0', '--device', 'cpu', '--no-pretrained',
+        '--decks', nothing, '--backgrounds', nothing, '--samples', nothing, '--out', str(out),
+        '--det-iters', '2', '--det-batch', '2', '--crop', '320', '--cls-steps', '2', '--cls-batch', '4',
+        '--val-scenes', '1', '--val-crops', '16', '--workers', '0', '--device', 'cpu', '--no-pretrained',
+        '--eval-dir', nothing,
     ])
-    assert set(metrics) == {'valid_accuracy', 'test_accuracy', 'train_images', 'epochs'}
     assert json.loads((out / 'labels.json').read_text()) == CODES
-    session = ort.InferenceSession(str(out / 'cards.onnx'), providers=['CPUExecutionProvider'])
-    logits = session.run(None, {'image': np.zeros((3, 3, 224, 224), np.float32)})[0]
+    assert (out / 'geometry.json').exists() and (out / 'metrics.json').exists()
+    assert metrics['cls_steps'] == 2 and metrics['captured_faces'] == 0
+
+    cards = ort.InferenceSession(str(out / 'cards.onnx'), providers=['CPUExecutionProvider'])
+    logits, orient = cards.run(None, {'image': np.zeros((3, 3, 128, 128), np.float32)})
     assert logits.shape == (3, len(CODES))
+    assert orient.shape == (3, 2)
+
+    corners = ort.InferenceSession(str(out / 'corners.onnx'), providers=['CPUExecutionProvider'])
+    boxes, labels, scores = corners.run(None, {'image': np.random.default_rng(0).random((3, 320, 320), dtype=np.float32)})
+    assert boxes.ndim == 2 and boxes.shape[1] == 4
+    assert len(labels) == len(scores) == len(boxes)
 
 
-def test_training_without_a_validation_set_still_saves_a_checkpoint(tmp_path):
-    """Only your own saved samples, no Kaggle folders: the best checkpoint is picked by training loss."""
-    samples = tmp_path / 'samples'
-    rng = np.random.default_rng(0)
-    for code in ('7D', 'AS'):
-        (samples / code).mkdir(parents=True)
-        for i in range(3):
-            cv2.imwrite(str(samples / code / f'{i}.jpg'), np.full((300, 200, 3), rng.integers(0, 255, size=3), np.uint8))
-    out = tmp_path / 'models'
-    metrics = train.main([
-        '--data', str(tmp_path / 'missing'), '--samples', str(samples), '--out', str(out), '--sample-repeat', '1',
-        '--epochs', '2', '--batch', '4', '--workers', '0', '--device', 'cpu', '--no-pretrained',
-    ])
-    assert metrics['valid_accuracy'] is None and metrics['test_accuracy'] is None
-    assert (out / 'best.pt').exists() and (out / 'cards.onnx').exists()
+def test_classifier_export_check_scales_with_the_output_size(tmp_path):
+    """A network whose logits are large (as after a short run) still exports: float32 noise is not a mismatch."""
+    model = train.build_index_net(pretrained=False)
+    with torch.no_grad():
+        model.cls.weight.mul_(400)  # logits of the order of 100, like an unsettled short run
+    path = train.export_classifier(model, str(tmp_path / 'cards.onnx'))
+    assert (tmp_path / 'cards.onnx').exists() and path

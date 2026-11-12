@@ -52,17 +52,24 @@ test('validators', () => {
   assert.equal(photoExtension('image/PNG; charset=binary'), '.png');
   assert.equal(photoExtension('image/heic'), null);
   assert.equal(visionPaths('/app').model, path.join('/app', 'vision', 'models', 'cards.onnx'));
+  assert.equal(visionPaths('/app').detector, path.join('/app', 'vision', 'models', 'corners.onnx'));
 });
 
 test('recognize sends the photo path and resolves with the cards', async () => {
   const cards = [{ id: 'x-0', code: '7D', confidence: 0.9 }];
   const { spawnFn, calls } = fakeSpawn(request => ({ id: request.id, cards }));
   const recognizer = createRecognizer(PATHS, { spawnFn, exists: always });
-  assert.deepEqual(await recognizer.recognize('/tmp/photo.jpg'), cards);
-  assert.deepEqual(await recognizer.recognize('/tmp/photo2.jpg'), cards);
+  assert.deepEqual(await recognizer.recognize('/tmp/photo.jpg'), { cards, ignoredAtEdge: 0 });
+  assert.deepEqual(await recognizer.recognize('/tmp/photo2.jpg'), { cards, ignoredAtEdge: 0 });
   assert.equal(calls.length, 1, 'the worker is started once and reused');
-  assert.deepEqual(calls[0].args, [PATHS.script, PATHS.model, PATHS.labels, PATHS.pending]);
+  assert.deepEqual(calls[0].args, [PATHS.script, PATHS.detector, PATHS.model, PATHS.labels, PATHS.pending]);
   recognizer.stop();
+});
+
+test('a missing detector model means card recognition is not set up', async () => {
+  const recognizer = createRecognizer(PATHS, { spawnFn: fakeSpawn(() => null).spawnFn, exists: file => file !== PATHS.detector });
+  assert.equal(recognizer.available(), false);
+  await assert.rejects(recognizer.recognize('/tmp/a.jpg'), { message: NOT_SET_UP });
 });
 
 test('worker errors, exits and timeouts reject the request', async () => {
@@ -95,7 +102,7 @@ test('recognizePhoto stores the upload only while recognising', async () => {
       recognize: async file => { seen = file; assert.equal(fs.readFileSync(file, 'utf8'), 'jpeg-bytes'); return [{ id: 'a-0', code: 'AS' }]; }
     };
     assert.deepEqual(await recognizePhoto(recognizer, paths, Buffer.from('jpeg-bytes'), 'image/jpeg'),
-      { status: 200, body: { cards: [{ id: 'a-0', code: 'AS' }] } });
+      { status: 200, body: { cards: [{ id: 'a-0', code: 'AS' }], ignoredAtEdge: 0 } });
     assert.match(seen, /\.jpg$/);
     assert.equal(fs.existsSync(seen), false);
     assert.equal((await recognizePhoto(recognizer, paths, Buffer.from('x'), 'image/heic')).status, 415);
@@ -152,7 +159,7 @@ test('a crashed worker is restarted for the next request', async () => {
   });
   const recognizer = createRecognizer(PATHS, { spawnFn: (...args) => { starts += 1; return spawnFn(...args); }, exists: always });
   await assert.rejects(recognizer.recognize('/tmp/a.jpg'), /stopped unexpectedly \(exit 1\)/);
-  assert.deepEqual(await recognizer.recognize('/tmp/b.jpg'), []);
+  assert.deepEqual(await recognizer.recognize('/tmp/b.jpg'), { cards: [], ignoredAtEdge: 0 });
   assert.equal(starts, 2);
   recognizer.stop();
 });
@@ -165,7 +172,54 @@ test('an error followed by an exit does not fail the replacement worker', async 
   workers[0].emit('error', new Error('boom'));
   const next = recognizer.recognize('/tmp/b.jpg'); // starts worker 2
   workers[0].emit('exit', 1); // late exit of worker 1
-  assert.deepEqual(await next, [{ id: 'ok' }]);
+  assert.deepEqual(await next, { cards: [{ id: 'ok' }], ignoredAtEdge: 0 });
+  recognizer.stop();
+});
+
+test('the edge count from the worker is passed on', async () => {
+  const { spawnFn } = fakeSpawn(request => ({ id: request.id, cards: [], ignoredAtEdge: 2 }));
+  const recognizer = createRecognizer(PATHS, { spawnFn, exists: always });
+  assert.deepEqual(await recognizer.recognize('/tmp/a.jpg'), { cards: [], ignoredAtEdge: 2 });
+  recognizer.stop();
+});
+
+test('a timed-out photo kills the stuck worker, fails the others, and the next photo gets a fresh worker', async () => {
+  let starts = 0;
+  const killed = [];
+  const { spawnFn } = fakeSpawn(request => (starts === 1 ? null : { id: request.id, cards: [] }));
+  const recognizer = createRecognizer(PATHS, {
+    spawnFn: (...args) => {
+      starts += 1;
+      const child = spawnFn(...args);
+      const kill = child.kill;
+      child.kill = () => { killed.push(starts); kill(); };
+      return child;
+    },
+    exists: always,
+    timeoutMs: 30
+  });
+  const first = recognizer.recognize('/tmp/a.jpg');
+  const second = recognizer.recognize('/tmp/b.jpg');
+  await assert.rejects(first, /timed out/);
+  await assert.rejects(second, /restarted/);
+  assert.equal(killed.length, 1);
+  assert.deepEqual(await recognizer.recognize('/tmp/c.jpg'), { cards: [], ignoredAtEdge: 0 });
+  assert.equal(starts, 2);
+  recognizer.stop();
+});
+
+test('output flushed by a killed worker does not corrupt the replacement worker', async () => {
+  const workers = [];
+  const { spawnFn } = fakeSpawn(request => (workers.length === 1 ? null : { id: request.id, cards: [] }));
+  const recognizer = createRecognizer(PATHS, {
+    spawnFn: (...args) => { const child = spawnFn(...args); workers.push(child); return child; },
+    exists: always,
+    timeoutMs: 30
+  });
+  await assert.rejects(recognizer.recognize('/tmp/a.jpg'), /timed out/);
+  const next = recognizer.recognize('/tmp/b.jpg'); // starts worker 2
+  workers[0].stdout.write('{"id": "half a li'); // the killed worker's last, unfinished line
+  assert.deepEqual(await next, { cards: [], ignoredAtEdge: 0 });
   recognizer.stop();
 });
 
@@ -207,8 +261,8 @@ test('replies split across chunks and concurrent requests are matched by id', as
     exists: always
   });
   const [first, second] = await Promise.all([recognizer.recognize('/tmp/1.jpg'), recognizer.recognize('/tmp/2.jpg')]);
-  assert.deepEqual(first, [{ id: 'c1' }]);
-  assert.deepEqual(second, [{ id: 'c0' }]);
+  assert.deepEqual(first.cards, [{ id: 'c1' }]);
+  assert.deepEqual(second.cards, [{ id: 'c0' }]);
   recognizer.stop();
 });
 

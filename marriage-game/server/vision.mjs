@@ -27,6 +27,7 @@ export function visionPaths(root) {
   return {
     python: path.join(root, 'vision', '.venv', 'bin', 'python'),
     script: path.join(root, 'vision', 'recognize.py'),
+    detector: path.join(root, 'vision', 'models', 'corners.onnx'),
     model: path.join(root, 'vision', 'models', 'cards.onnx'),
     labels: path.join(root, 'vision', 'models', 'labels.json'),
     pending: path.join(root, 'data', 'vision', 'pending'),
@@ -42,7 +43,7 @@ export function createRecognizer(paths, { spawnFn = spawn, exists = fs.existsSyn
   let buffer = '';
   const waiting = new Map();
 
-  const available = () => [paths.python, paths.script, paths.model, paths.labels].every(file => exists(file));
+  const available = () => [paths.python, paths.script, paths.detector, paths.model, paths.labels].every(file => exists(file));
 
   function failAll(error) {
     waiting.forEach(({ reject, timer }) => {
@@ -68,7 +69,12 @@ export function createRecognizer(paths, { spawnFn = spawn, exists = fs.existsSyn
     waiting.delete(message.id);
     clearTimeout(entry.timer);
     if (message.error) entry.reject(new Error(message.error));
-    else entry.resolve(message.cards);
+    else {
+      entry.resolve({
+        cards: Array.isArray(message.cards) ? message.cards : [],
+        ignoredAtEdge: Number.isInteger(message.ignoredAtEdge) ? message.ignoredAtEdge : 0
+      });
+    }
   }
 
   function start() {
@@ -80,12 +86,15 @@ export function createRecognizer(paths, { spawnFn = spawn, exists = fs.existsSyn
     });
     ready.catch(() => {});
     buffer = '';
-    worker = spawnFn(paths.python, [paths.script, paths.model, paths.labels, paths.pending], {
+    const child = spawnFn(paths.python, [paths.script, paths.detector, paths.model, paths.labels, paths.pending], {
       cwd: path.dirname(paths.script),
       stdio: ['pipe', 'pipe', 'pipe']
     });
+    worker = child;
     worker.stdout.setEncoding('utf8');
     worker.stdout.on('data', chunk => {
+      // A killed worker can still flush output; it must not mix into the replacement's line buffer.
+      if (worker !== child) return;
       buffer += chunk;
       let newline;
       while ((newline = buffer.indexOf('\n')) >= 0) {
@@ -95,7 +104,6 @@ export function createRecognizer(paths, { spawnFn = spawn, exists = fs.existsSyn
       }
     });
     worker.stderr.on('data', chunk => console.error('[vision]', String(chunk).trim()));
-    const child = worker;
     const stopped = (error) => {
       if (worker !== child) return; // already handled (error is followed by exit), or replaced by a newer worker
       markFailed(error);
@@ -129,10 +137,17 @@ export function createRecognizer(paths, { spawnFn = spawn, exists = fs.existsSyn
     if (!worker) start();
     await waitUntilReady();
     const id = crypto.randomBytes(8).toString('hex');
+    const sentTo = worker;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         waiting.delete(id);
         reject(new Error('Card recognition timed out.'));
+        // A worker that misses a reply is stuck: kill it so the next photo starts a fresh one.
+        if (sentTo && worker === sentTo) {
+          worker = null;
+          failAll(new Error('Card recognition was restarted after a photo took too long. Try again.'));
+          sentTo.kill();
+        }
       }, timeoutMs);
       waiting.set(id, { resolve, reject, timer });
       if (!worker) {
@@ -186,8 +201,9 @@ export async function recognizePhoto(recognizer, paths, photo, contentType) {
   const file = path.join(paths.uploads, `${crypto.randomBytes(8).toString('hex')}${extension}`);
   fs.writeFileSync(file, photo);
   try {
-    const cards = await recognizer.recognize(file);
-    return { status: 200, body: { cards } };
+    const result = await recognizer.recognize(file);
+    const cards = Array.isArray(result) ? result : result.cards;
+    return { status: 200, body: { cards, ignoredAtEdge: Array.isArray(result) ? 0 : result.ignoredAtEdge || 0 } };
   } catch (error) {
     return { status: 500, body: { error: error.message } };
   } finally {
