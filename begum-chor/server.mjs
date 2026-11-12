@@ -1,8 +1,10 @@
 import http from 'http';
 import { WebSocketServer } from 'ws';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { pickLanAddresses } from './server/net.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
@@ -22,9 +24,26 @@ const server = http.createServer((req, res) => {
   }
 
   const buildPath = path.join(__dirname, 'build');
-  if (req.url === '/health') {
+  const requestPath = req.url.split('?')[0];
+  if (requestPath === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  if (requestPath === '/api/info') {
+    const addresses = pickLanAddresses(os.networkInterfaces());
+    const port = server.address()?.port || Number(PORT);
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store'
+    });
+    res.end(JSON.stringify({
+      ip: addresses[0] || null,
+      addresses,
+      port,
+      hostname: os.hostname(),
+      urls: addresses.map(address => `http://${address}:${port}`)
+    }));
     return;
   }
   if (fs.existsSync(buildPath)) {
@@ -135,5 +154,10 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Begam Chor server running at http://0.0.0.0:${PORT}`);
+  const port = server.address().port;
+  const addresses = pickLanAddresses(os.networkInterfaces());
+  console.log(`Begam Chor server running:`);
+  console.log(`  Local:   http://localhost:${port}`);
+  addresses.forEach(address => console.log(`  Network: http://${address}:${port}`));
+  if (!addresses.length) console.log('  Network: no private IPv4 address detected');
 });

@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { Line } from 'react-chartjs-2';
+import { QRCodeSVG } from 'qrcode.react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -11,12 +12,92 @@ import {
   Legend
 } from 'chart.js';
 import { computeTotals, getAdjustment, getResolvedScore, validateRound } from './scoring';
+import { buildInviteUrl, parseSessionCode } from './invite';
 import './App.css';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
 const WS_URL = process.env.REACT_APP_WS_URL || `ws://${window.location.hostname}:3001`;
 const PLAYER_COLORS = ['#d1495b', '#00798c', '#edae49', '#30638e', '#6a994e'];
+
+function setAddressSession(code) {
+  const url = new URL(window.location.href);
+  if (code) url.searchParams.set('session', code);
+  else url.searchParams.delete('session');
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+function InviteCard({ code, inviteInfo, expanded, onToggle }) {
+  const [copyMessage, setCopyMessage] = useState('');
+  useEffect(() => setCopyMessage(''), [code]);
+  const addresses = inviteInfo?.addresses?.length
+    ? inviteInfo.addresses
+    : inviteInfo?.ip ? [inviteInfo.ip] : [];
+  const inviteUrls = inviteInfo ? (addresses.length ? addresses : [null]).map(address => buildInviteUrl({
+    hostname: window.location.hostname,
+    port: window.location.port,
+    protocol: window.location.protocol,
+    lanIp: address,
+    code
+  })) : [];
+  const inviteUrl = inviteUrls[0] || '';
+
+  const copyInvite = async () => {
+    if (!inviteUrl) return;
+    let copied = false;
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(inviteUrl);
+        copied = true;
+      } catch (error) {
+        copied = false;
+      }
+    }
+    if (!copied) {
+      const field = document.createElement('textarea');
+      field.value = inviteUrl;
+      field.setAttribute('readonly', '');
+      field.style.position = 'fixed';
+      field.style.opacity = '0';
+      document.body.appendChild(field);
+      field.select();
+      try { copied = document.execCommand('copy'); } catch (error) { copied = false; }
+      document.body.removeChild(field);
+    }
+    setCopyMessage(copied ? 'Invite link copied' : 'Select and copy the link above');
+  };
+
+  return (
+    <section className="invite-card" aria-labelledby="invite-heading">
+      <div className="invite-heading-row">
+        <div>
+          <h2 id="invite-heading">Invite players</h2>
+          <p>Share this link or scan the QR code to join session <strong>{code}</strong>.</p>
+        </div>
+        <button type="button" className="qr-toggle" onClick={onToggle} aria-expanded={expanded}>
+          {expanded ? 'Hide QR' : 'Show QR'}
+        </button>
+      </div>
+      <div className="invite-link-row">
+        <input aria-label="Session invite link" value={inviteUrl || 'Detecting network address…'} readOnly onFocus={event => event.target.select()} />
+        <button type="button" onClick={copyInvite} disabled={!inviteUrl}>Copy link</button>
+      </div>
+      {copyMessage && <p className="copy-message" role="status">{copyMessage}</p>}
+      {inviteInfo?.unavailable && <p className="invite-note">LAN address unavailable; this link uses the current address and may only work on this device.</p>}
+      {inviteUrls.length > 1 && (
+        <details className="alternate-invites">
+          <summary>Other network addresses</summary>
+          {inviteUrls.slice(1).map(url => <a href={url} key={url}>{url}</a>)}
+        </details>
+      )}
+      {expanded && (
+        <div className="invite-qr" aria-label="QR code for session invite">
+          {inviteUrl ? <QRCodeSVG value={inviteUrl} size={156} level="M" includeMargin /> : <span>Detecting link…</span>}
+        </div>
+      )}
+    </section>
+  );
+}
 
 function App() {
   const [sessionId, setSessionId] = useState(null);
@@ -30,13 +111,18 @@ function App() {
   const [editingRound, setEditingRound] = useState(null);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
+  const [inviteInfo, setInviteInfo] = useState(null);
+  const [showQr, setShowQr] = useState(() => window.matchMedia?.('(max-width: 700px)').matches || false);
   const wsRef = useRef(null);
   const savedSessionRef = useRef(null);
+  const pendingInviteRef = useRef(false);
 
   useEffect(() => {
     let stopped = false;
     let reconnectTimer;
-    savedSessionRef.current = localStorage.getItem('begamchor_session');
+    const inviteCode = parseSessionCode(window.location.search);
+    pendingInviteRef.current = Boolean(inviteCode);
+    savedSessionRef.current = inviteCode || localStorage.getItem('begamchor_session');
 
     function connect() {
       if (stopped) return;
@@ -59,12 +145,18 @@ function App() {
           case 'session_created':
             localStorage.setItem('begamchor_session', msg.sessionId);
             savedSessionRef.current = msg.sessionId;
+            pendingInviteRef.current = false;
+            setAddressSession(msg.sessionId);
             setSessionId(msg.sessionId);
             setPlayers(msg.players);
             setScores(msg.scores);
             setLoading(false);
             break;
           case 'session_joined':
+            localStorage.setItem('begamchor_session', msg.sessionId);
+            savedSessionRef.current = msg.sessionId;
+            pendingInviteRef.current = false;
+            setAddressSession(msg.sessionId);
             setSessionId(msg.sessionId);
             setPlayers(msg.players);
             setScores(msg.scores);
@@ -75,7 +167,11 @@ function App() {
             setScores(msg.scores);
             break;
           case 'error':
-            setSessionError(msg.message);
+            setSessionError(pendingInviteRef.current
+              ? 'This invite link is no longer active. Ask the host to create a new session.'
+              : msg.message);
+            if (pendingInviteRef.current) setAddressSession(null);
+            pendingInviteRef.current = false;
             localStorage.removeItem('begamchor_session');
             savedSessionRef.current = null;
             setSessionId(null);
@@ -106,6 +202,29 @@ function App() {
       if (wsRef.current) wsRef.current.close();
     };
   }, []);
+
+  useEffect(() => {
+    if (!sessionId) {
+      setInviteInfo(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const infoUrl = new URL(WS_URL.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:'));
+    infoUrl.pathname = '/api/info';
+    infoUrl.search = '';
+    fetch(infoUrl.toString())
+      .then(response => {
+        if (!response.ok) throw new Error('Network info unavailable');
+        return response.json();
+      })
+      .then(info => {
+        if (!cancelled) setInviteInfo({ ...info, unavailable: !info.addresses?.length });
+      })
+      .catch(() => {
+        if (!cancelled) setInviteInfo({ ip: null, addresses: [], unavailable: true });
+      });
+    return () => { cancelled = true; };
+  }, [sessionId]);
 
   const canSend = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -191,7 +310,9 @@ function App() {
 
   const handleNewGame = () => {
     localStorage.removeItem('begamchor_session');
+    setAddressSession(null);
     savedSessionRef.current = null;
+    pendingInviteRef.current = false;
     setSessionId(null);
     setScores([]);
     resetRoundForm();
@@ -307,6 +428,12 @@ function App() {
       </div>
 
       <h1>Begam Chor Score Card</h1>
+      <InviteCard
+        code={sessionId}
+        inviteInfo={inviteInfo}
+        expanded={showQr}
+        onToggle={() => setShowQr(expanded => !expanded)}
+      />
 
       <section className="score-input" aria-labelledby="round-entry-heading">
         <h2 id="round-entry-heading">

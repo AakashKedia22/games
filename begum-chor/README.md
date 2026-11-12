@@ -22,6 +22,8 @@ A real-time multiplayer score tracker for the card game **Begam Chor** (also kno
 | 3 | Enter round scores from any device |
 | 4 | All devices update instantly |
 
+After creating a session, share the generated invite link or let other players scan its QR code. Opening the link joins that session directly. Anyone in the session can share the same invite.
+
 ## Scoring Rules
 
 - Each round, players enter their **share** of the 25 points. Shares must total exactly **25**, and at least one share must be **12 or more** (the Kaali Begam holder).
@@ -81,7 +83,11 @@ This builds the React app and starts a single server that serves both the fronte
 
 ### Access from other devices
 
-Your laptop's IP is displayed in the terminal. Open `http://<YOUR_IP>:3000` (dev) or `http://<YOUR_IP>:3001` (prod) on any device on the same network.
+The server prints its local and detected network URLs in the terminal. In production, open the network URL on another device on the same Wi-Fi/LAN. In development, open `http://<YOUR_IP>:3000`; the app on that device also needs to reach port **3001** for live sync and network discovery.
+
+The session invite contains the current network IP and a session code, so players can join without typing the code. If your computer has multiple network interfaces, the app also lists alternate detected addresses. Allow the app through the macOS firewall if prompted on the first connection. Network addresses must be reachable from the other device (for example, both devices need to be on the same LAN).
+
+Sessions are held in memory and are lost when the server restarts. Invite links from an earlier server run will no longer work; create a new session and share its new link.
 
 ```
 Your IP example: 192.168.1.42
@@ -97,6 +103,7 @@ Phone URL:       http://192.168.1.42:3000
 | `npm run build` | Production build to `build/` |
 | `npm run prod` | Build + serve everything on `:3001` |
 | `npm test` | Run tests |
+| `npm run test:server` | Run server network-address tests |
 
 ## Project Structure
 

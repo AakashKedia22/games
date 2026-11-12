@@ -52,6 +52,7 @@ button {
 
 button:hover { background: var(--green-dark); }
 button:active { transform: translateY(1px); }
+button:disabled { opacity: .55; cursor: wait; }
 button:focus-visible, input:focus-visible {
   outline: 3px solid #e5b740;
   outline-offset: 2px;
@@ -113,6 +114,37 @@ button:focus-visible, input:focus-visible {
 .connection-dot { width: 9px; height: 9px; border-radius: 50%; background: #c34444; }
 .connection-indicator.connected .connection-dot { background: #2b965d; }
 .new-game-btn { background: #71817a; padding: 8px 13px; font-size: .86rem; }
+
+.invite-card {
+  margin: 14px 0 18px;
+  padding: 16px 18px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--green);
+  border-radius: 12px;
+  box-shadow: 0 4px 18px rgba(24, 56, 43, 0.05);
+}
+.invite-heading-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.invite-heading-row h2 { margin: 0 0 4px; font-size: 1.05rem; }
+.invite-heading-row p { margin: 0; color: var(--muted); font-size: .9rem; }
+.qr-toggle { flex: 0 0 auto; margin: 0; padding: 7px 11px; font-size: .82rem; }
+.invite-link-row { display: flex; align-items: stretch; gap: 8px; margin-top: 13px; }
+.invite-link-row input {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 9px 10px;
+  color: var(--ink);
+  background: #f7faf6;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: .88rem ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.invite-link-row button { flex: 0 0 auto; margin: 0; padding: 8px 13px; font-size: .86rem; }
+.copy-message, .invite-note { margin: 7px 0 0; color: var(--muted); font-size: .82rem; }
+.alternate-invites { margin-top: 10px; font-size: .84rem; }
+.alternate-invites summary { cursor: pointer; color: var(--green-dark); }
+.alternate-invites a { display: block; margin: 6px 0 0; overflow-wrap: anywhere; }
+.invite-qr { display: grid; place-items: center; width: max-content; margin: 14px auto 0; padding: 8px; background: white; border: 1px solid var(--line); border-radius: 8px; }
 
 .score-input { padding: 22px; margin-bottom: 18px; }
 .score-input h2 { text-align: center; }
@@ -222,6 +254,11 @@ button:focus-visible, input:focus-visible {
   .session-header { flex-wrap: wrap; font-size: .83rem; }
   .session-code { flex: 1 1 auto; }
   .connection-indicator { order: 3; flex-basis: 100%; }
+  .invite-card { padding: 13px 11px; }
+  .invite-heading-row p { font-size: .82rem; }
+  .invite-link-row { gap: 6px; }
+  .invite-link-row input { font-size: .75rem; padding: 8px 6px; }
+  .invite-link-row button { padding: 8px 9px; font-size: .78rem; }
   .score-input { padding: 13px 10px; }
   .player-entry-list { gap: 7px; }
   .player-score {
