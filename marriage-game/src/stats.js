@@ -6,7 +6,8 @@ export function computePlayerStats(rounds, players) {
   const stats = {};
   players.forEach(player => {
     stats[player] = {
-      player, rounds: 0, total: 0, bandhs: 0, hathPoints: 0, jokerPoints: 0, best: null, worst: null, doublesTriggered: 0
+      player, rounds: 0, total: 0, bandhs: 0, hathPoints: 0, jokerPoints: 0, best: null, worst: null, doublesTriggered: 0,
+      packs: 0
     };
   });
   results.forEach((result, index) => {
@@ -22,6 +23,7 @@ export function computePlayerStats(rounds, players) {
       row.best = row.best === null ? net : Math.max(row.best, net);
       row.worst = row.worst === null ? net : Math.min(row.worst, net);
       if (entry && Number(entry.joker) >= DOUBLE_THRESHOLD) row.doublesTriggered += 1;
+      if (entry && entry.packed === true) row.packs += 1;
     });
   });
   return players.map(player => stats[player]);
